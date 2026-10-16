@@ -94,7 +94,7 @@ jobs:
         if: steps.sync.outputs.need_build == 'true'
         shell: pwsh
         run: |
-          $tag = "${{ steps.sync.outputs.tag }}".TrimStart('v')
+          $tag = "${{ steps.sync.outputs.tag }}".TrimStart('v') -replace '-', '.'
           $cargo = "src-tauri/Cargo.toml"
           (Get-Content $cargo) -replace '^version = ".*"', "version = `"$tag`"" | Set-Content $cargo
           Get-Content $cargo | Select-Object -First 5
