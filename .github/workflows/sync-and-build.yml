@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync from upstream
+      - name: Sync upstream & check if build needed
         id: sync
         shell: pwsh
         env:
@@ -36,80 +36,66 @@ jobs:
           git fetch upstream
           $localSha = git rev-parse HEAD
           $upstreamSha = git rev-parse upstream/main
-          Write-Output "Local: $localSha"
-          Write-Output "Upstream: $upstreamSha"
-          if ($localSha -eq $upstreamSha) {
-            Write-Output "Already in sync"
-            Add-Content $env:GITHUB_OUTPUT "synced=false"
-            exit 0
-          }
-          git merge upstream/main --no-edit
-          git push origin main
-          Write-Output "Synced and pushed"
-          Add-Content $env:GITHUB_OUTPUT "synced=true"
-          Add-Content $env:GITHUB_OUTPUT "new_sha=$upstreamSha"
+          Write-Output "Fork HEAD: $localSha"
+          Write-Output "Upstream HEAD: $upstreamSha"
 
-      - name: Check if there are new commits to build
-        id: check
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $false
-          $headSha = git rev-parse HEAD
-          Add-Content $env:GITHUB_OUTPUT "head_sha=$headSha"
+          if ($localSha -ne $upstreamSha) {
+            Write-Output "New upstream commits, syncing..."
+            git merge upstream/main --no-edit
+            git push origin main
+            $localSha = git rev-parse HEAD
+          }
+
+          # Check if this commit was already built
           $lastRelease = gh release list --limit 1 --json tagName -q '.[0].tagName' 2>$null
           $global:LASTEXITCODE = 0
-          if (-not $lastRelease) {
-            Add-Content $env:GITHUB_OUTPUT "has_new=true"
-            exit 0
-          }
-          $lastBody = gh release view $lastRelease --json body -q '.body' 2>$null
-          $global:LASTEXITCODE = 0
-          if ($lastBody -match 'Source commit:\s*([0-9a-f]{40})') {
-            if ($headSha -eq $Matches[1]) {
-              Add-Content $env:GITHUB_OUTPUT "has_new=false"
-              exit 0
+          $needBuild = $true
+          if ($lastRelease) {
+            $lastBody = gh release view $lastRelease --json body -q '.body' 2>$null
+            $global:LASTEXITCODE = 0
+            if ($lastBody -match 'Source commit:\s*([0-9a-f]{40})' -and $localSha -eq $Matches[1]) {
+              $needBuild = $false
             }
           }
-          Add-Content $env:GITHUB_OUTPUT "has_new=true"
+          Write-Output "Need build: $needBuild"
+          Add-Content $env:GITHUB_OUTPUT "head_sha=$localSha"
+          Add-Content $env:GITHUB_OUTPUT "need_build=$needBuild"
 
       - name: Setup Node
-        if: steps.check.outputs.has_new == 'true'
+        if: steps.sync.outputs.need_build == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Setup Rust
-        if: steps.check.outputs.has_new == 'true'
+        if: steps.sync.outputs.need_build == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
-        if: steps.check.outputs.has_new == 'true'
+        if: steps.sync.outputs.need_build == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
 
       - name: Install dependencies
-        if: steps.check.outputs.has_new == 'true'
+        if: steps.sync.outputs.need_build == 'true'
         run: npm install
 
       - name: Build Tauri (exe only)
-        if: steps.check.outputs.has_new == 'true'
+        if: steps.sync.outputs.need_build == 'true'
         shell: pwsh
         run: npx tauri build --no-bundle
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Release
-        if: steps.check.outputs.has_new == 'true'
+        if: steps.sync.outputs.need_build == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $headSha = "${{ steps.check.outputs.head_sha }}"
+          $headSha = "${{ steps.sync.outputs.head_sha }}"
           $short = $headSha.Substring(0,7)
           $date = Get-Date -Format "yyyyMMdd-HHmm"
           $tag = "v$date-$short"
