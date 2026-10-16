@@ -96,9 +96,9 @@ jobs:
         run: |
           $date = Get-Date -Format "yyyyMMdd.HHmm"
           $cargoVer = "$date.0"
-          $cargo = "src-tauri/Cargo.toml"
-          (Get-Content $cargo) -replace '^version = ".*"', "version = `"$cargoVer`"" | Set-Content $cargo
-          Get-Content $cargo | Select-Object -First 5
+          (Get-Content "src-tauri/Cargo.toml") -replace '^version = ".*"', "version = `"$cargoVer`"" | Set-Content "src-tauri/Cargo.toml"
+          (Get-Content "src-tauri/tauri.conf.json") -replace '"version": ".*"', "`"version`": `"$cargoVer`"" | Set-Content "src-tauri/tauri.conf.json"
+          Get-Content "src-tauri/tauri.conf.json" | Select-Object -First 5
 
       - name: Build Tauri (exe only)
         if: steps.sync.outputs.need_build == 'true'
