@@ -48,15 +48,19 @@ jobs:
           }
 
           # Check if this commit was already built
-          $lastRelease = gh release list --repo ${{ env.PUBLISH_REPO }} --limit 1 --json tagName -q '.[0].tagName' 2>$null
-          $global:LASTEXITCODE = 0
           $needBuild = $true
-          if ($lastRelease) {
-            $lastBody = gh release view $lastRelease --repo ${{ env.PUBLISH_REPO }} --json body -q '.body' 2>$null
+          try {
+            $lastRelease = gh release list --repo ${{ env.PUBLISH_REPO }} --limit 1 --json tagName -q '.[0].tagName' 2>$null
             $global:LASTEXITCODE = 0
-            if ($lastBody -match 'Source commit:\s*([0-9a-f]{40})' -and $localSha -eq $Matches[1]) {
-              $needBuild = $false
+            if ($lastRelease) {
+              $lastBody = gh release view $lastRelease --repo ${{ env.PUBLISH_REPO }} --json body -q '.body' 2>$null
+              $global:LASTEXITCODE = 0
+              if ($lastBody -and $lastBody -match 'Source commit:\s*([0-9a-f]{40})') {
+                if ($localSha -eq $Matches[1]) { $needBuild = $false }
+              }
             }
+          } catch {
+            Write-Output "Release check skipped: $_"
           }
           Write-Output "Need build: $needBuild"
           $short = $localSha.Substring(0,7)
