@@ -11,6 +11,7 @@ permissions:
 
 env:
   UPSTREAM_REPO: KinkOwO/115US-launcher
+  PUBLISH_REPO: RicardoLz/115-launcher
 
 jobs:
   build:
@@ -47,11 +48,11 @@ jobs:
           }
 
           # Check if this commit was already built
-          $lastRelease = gh release list --limit 1 --json tagName -q '.[0].tagName' 2>$null
+          $lastRelease = gh release list --repo ${{ env.PUBLISH_REPO }} --limit 1 --json tagName -q '.[0].tagName' 2>$null
           $global:LASTEXITCODE = 0
           $needBuild = $true
           if ($lastRelease) {
-            $lastBody = gh release view $lastRelease --json body -q '.body' 2>$null
+            $lastBody = gh release view $lastRelease --repo ${{ env.PUBLISH_REPO }} --json body -q '.body' 2>$null
             $global:LASTEXITCODE = 0
             if ($lastBody -match 'Source commit:\s*([0-9a-f]{40})' -and $localSha -eq $Matches[1]) {
               $needBuild = $false
@@ -102,4 +103,4 @@ jobs:
           $exe = "src-tauri/target/release/dfo-launcher.exe"
           if (-not (Test-Path $exe)) { Write-Error "Build failed: exe not found" }
           $body = "Auto build from ${{ env.UPSTREAM_REPO }}@$short`nSource commit: $headSha"
-          gh release create $tag $exe --title "Build $tag" --notes $body
+          gh release create $tag $exe --repo ${{ env.PUBLISH_REPO }} --title "Build $tag" --notes $body
