@@ -1,0 +1,119 @@
+name: Sync & Build
+
+on:
+  schedule:
+    # Daily at 06:00 Beijing time (22:00 UTC)
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_REPO: KinkOwO/115US-launcher
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync from upstream
+        id: sync
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git
+          git fetch upstream
+          $localSha = git rev-parse HEAD
+          $upstreamSha = git rev-parse upstream/main
+          Write-Output "Local: $localSha"
+          Write-Output "Upstream: $upstreamSha"
+          if ($localSha -eq $upstreamSha) {
+            Write-Output "Already in sync"
+            Add-Content $env:GITHUB_OUTPUT "synced=false"
+            exit 0
+          }
+          git merge upstream/main --no-edit
+          git push origin main
+          Write-Output "Synced and pushed"
+          Add-Content $env:GITHUB_OUTPUT "synced=true"
+          Add-Content $env:GITHUB_OUTPUT "new_sha=$upstreamSha"
+
+      - name: Check if there are new commits to build
+        id: check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $headSha = git rev-parse HEAD
+          Add-Content $env:GITHUB_OUTPUT "head_sha=$headSha"
+          $lastRelease = gh release list --limit 1 --json tagName -q '.[0].tagName' 2>$null
+          $global:LASTEXITCODE = 0
+          if (-not $lastRelease) {
+            Add-Content $env:GITHUB_OUTPUT "has_new=true"
+            exit 0
+          }
+          $lastBody = gh release view $lastRelease --json body -q '.body' 2>$null
+          $global:LASTEXITCODE = 0
+          if ($lastBody -match 'Source commit:\s*([0-9a-f]{40})') {
+            if ($headSha -eq $Matches[1]) {
+              Add-Content $env:GITHUB_OUTPUT "has_new=false"
+              exit 0
+            }
+          }
+          Add-Content $env:GITHUB_OUTPUT "has_new=true"
+
+      - name: Setup Node
+        if: steps.check.outputs.has_new == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        if: steps.check.outputs.has_new == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        if: steps.check.outputs.has_new == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install dependencies
+        if: steps.check.outputs.has_new == 'true'
+        run: npm install
+
+      - name: Build Tauri (exe only)
+        if: steps.check.outputs.has_new == 'true'
+        shell: pwsh
+        run: npx tauri build --no-bundle
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        if: steps.check.outputs.has_new == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headSha = "${{ steps.check.outputs.head_sha }}"
+          $short = $headSha.Substring(0,7)
+          $date = Get-Date -Format "yyyyMMdd-HHmm"
+          $tag = "v$date-$short"
+          $exe = "src-tauri/target/release/dfo-launcher.exe"
+          if (-not (Test-Path $exe)) { Write-Error "Build failed: exe not found" }
+          $body = "Auto build from ${{ env.UPSTREAM_REPO }}@$short`nSource commit: $headSha"
+          gh release create $tag $exe --title "Build $tag" --notes $body
