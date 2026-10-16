@@ -272,6 +272,9 @@ impl Session {
         match self.start_flow(mode, epoch, &settings) {
             Ok(detail) => {
                 self.set(Phase::Running, detail.clone());
+                // 游戏跑起来了，更新包 zip 缓存可以删了。
+                crate::updater::cleanup_download_cache();
+                crate::self_updater::cleanup_self_update_cache();
                 Ok(StartOutcome {
                     started: true,
                     phase: Phase::Running,

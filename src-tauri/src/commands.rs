@@ -17,7 +17,9 @@ use crate::portguard::{self, Report};
 use crate::report;
 use crate::saves;
 use crate::session::{self, Mode, Phase, Readiness, Session, StartOutcome, Status};
+use crate::self_updater;
 use crate::site;
+use crate::updater;
 
 pub const APP_NAME: &str = "DFO-115US 启动器";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -667,4 +669,80 @@ pub async fn saves_restore(
         Ok(ActionRecord { message })
     })
     .await
+}
+
+// ---------------------------------------------------------------- 服务端更新
+
+/// 查询 GitHub 最新 Release，对比本地已部署版本。
+#[tauri::command]
+pub async fn server_update_check(
+    state: tauri::State<'_, AppState>,
+) -> Result<updater::UpdateCheck, String> {
+    let root = state.root.clone();
+    join(move || updater::check(&root)).await
+}
+
+/// 检查并下载安装最新服务端。已是最新则不下载。
+#[tauri::command]
+pub async fn server_update_apply(
+    state: tauri::State<'_, AppState>,
+) -> Result<ActionRecord, String> {
+    let session = state.session.clone();
+    let root = state.root.clone();
+    let bus = session.bus().clone();
+    join(move || {
+        let info = updater::check(&root)?;
+        if !info.has_update {
+            return Ok(ActionRecord {
+                message: format!("已是最新（{}）", info.latest_tag),
+            });
+        }
+        let message = updater::apply(&root, &info, &bus)?;
+        Ok(ActionRecord { message })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn self_update_check(state: tauri::State<'_, AppState>) -> Result<self_updater::SelfUpdateCheck, String> {
+    let bus = state.session.bus().clone();
+    join(move || {
+        bus.info("[自更新] 正在检查启动器更新…");
+        let result = self_updater::check();
+        match &result {
+            Ok(info) => {
+                if info.has_update {
+                    bus.info(format!("[自更新] 发现新版本 v{}（当前 v{}）", info.latest_version, info.current_version));
+                } else {
+                    bus.info(format!("[自更新] 已是最新（v{}）", info.current_version));
+                }
+            }
+            Err(e) => bus.warn(format!("[自更新] 检查失败：{e}")),
+        }
+        result
+    }).await
+}
+
+#[tauri::command]
+pub async fn self_update_apply(state: tauri::State<'_, AppState>, info: self_updater::SelfUpdateCheck) -> Result<ActionRecord, String> {
+    let bus = state.session.bus().clone();
+    join(move || {
+        bus.info(format!("[自更新] 开始下载 v{}…", info.latest_version));
+        let bus2 = bus.clone();
+        match self_updater::apply_self_update(&info, move |msg| bus2.info(msg)) {
+            Ok(msg) => {
+                bus.info(format!("[自更新] {msg}"));
+                Ok(ActionRecord { message: msg })
+            }
+            Err(e) => {
+                bus.error(format!("[自更新] {e}"));
+                Err(e)
+            }
+        }
+    }).await
+}
+
+#[tauri::command]
+pub fn self_update_cleanup() {
+    self_updater::cleanup_self_update_cache();
 }
