@@ -77,10 +77,30 @@ pub struct ScriptFile {
 pub struct ClientMods {
     pub dir: String,
     pub present: bool,
+    pub manifest: ManifestState,
     pub auto_discover: bool,
+    /// `mods/mods.json`（启动器自己那份开关清单）的形态。
+    pub switches: ManifestState,
+    pub switch_dir: String,
+    /// 开关能不能用：只有走 mod-loader 这一层才是「改了算数」的。
+    pub switchable: bool,
+    /// 宿主清单没缩成缩减版 / 登记被 modkit 换回去时的报警，空串表示正常。
+    pub bypass_note: String,
+    /// mod-loader 自己落的自证状态：它到底把哪几条装上了。
+    pub loader: LoaderStatus,
     pub plugins: Vec<ClientPlugin>,
     pub host_log: String,
     pub host_tail: Vec<String>,
+}
+
+/// `plugins.json` 自己在不在、认不认。宿主把「解析不出形状的清单」当成没有清单，
+/// 所以这两种情况下盘上所有 DLL 都会被加载 —— 页面上不能都写成「只加载清单里列的」。
+#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestState {
+    Present,
+    Missing,
+    Corrupt,
 }
 
 #[derive(Serialize)]
@@ -91,9 +111,32 @@ pub struct ClientPlugin {
     pub in_manifest: bool,
     pub enabled: bool,
     pub deps: Vec<String>,
+    /// 内置中文功能提示；表里没有就是空串，界面自己决定怎么兜底。
+    pub description: String,
+    /// mod-loader 报的实装结果：`None` = 这一层还没跑过（没迁移，或客户端没启动）。
+    pub loaded: Option<bool>,
+    pub load_note: String,
+    /// 统一入口调 `ModStart` 拿到的返回值。0 = 入口自己认账；非 0 表示 DLL 是装进进程了，
+    /// 但它拒绝启动（版本守卫不过、依赖没就绪……），所以「装上了」不等于「在干活」。
+    pub start_return: u32,
     /// 插件自己写的状态文件里的 `ready`；没写过就是 `None`。
     pub ready: Option<bool>,
     pub reject_reason: String,
+}
+
+/// `mods/mod-loader.status.json` —— 统一入口写给自己的一页账。
+#[derive(Serialize, Default)]
+pub struct LoaderStatus {
+    pub seen: bool,
+    pub ready: Option<bool>,
+    pub reject_reason: String,
+    pub declared: usize,
+    pub started: usize,
+    pub failed: usize,
+    /// 登记名（小写）→ (装上了没, 失败原因, 入口返回值)。界面只看每条插件自己的 `loaded`
+    /// 与 `start_return`，这页原始账不外传。
+    #[serde(skip)]
+    pub rows: Vec<(String, bool, String, u32)>,
 }
 
 // -------------------------------------------------------------------- modkit 安装层
@@ -124,6 +167,8 @@ struct EnabledFile {
 struct PluginFile {
     #[serde(rename = "autoDiscover", default = "is_true")]
     auto_discover: bool,
+    #[serde(default = "is_true")]
+    recurse: bool,
     #[serde(default)]
     plugins: Vec<PluginEntry>,
 }
@@ -137,6 +182,8 @@ struct PluginEntry {
     #[serde(default = "is_true")]
     enabled: bool,
     #[serde(default)]
+    description: String,
+    #[serde(default)]
     deps: Vec<String>,
 }
 
@@ -146,6 +193,35 @@ struct PluginStatus {
     ready: Option<bool>,
     #[serde(rename = "rejectReason", default)]
     reject_reason: String,
+}
+
+/// `mods/mod-loader.status.json` 的形状（字段名按统一入口写出的那份）。
+#[derive(Deserialize)]
+struct LoaderStatusFile {
+    #[serde(default)]
+    ready: Option<bool>,
+    #[serde(rename = "rejectReason", default)]
+    reject_reason: String,
+    #[serde(default)]
+    declared: usize,
+    #[serde(default)]
+    started: usize,
+    #[serde(default)]
+    failed: usize,
+    #[serde(default)]
+    mods: Vec<LoaderRow>,
+}
+
+#[derive(Deserialize)]
+struct LoaderRow {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    loaded: bool,
+    #[serde(default)]
+    returned: u32,
+    #[serde(default)]
+    fail: String,
 }
 
 #[derive(Deserialize)]
@@ -459,56 +535,344 @@ fn script_mods(root: &Root, scan: &GatewayScan) -> ScriptMods {
     }
 }
 
+/// 客户端目录下的 mod 全景。
+///
+/// 两套清单要分清：`.115us-mods/plugins.json` 归 modkit 所有（它是
+/// `qol.r7-runtime-repair` 的 file.replace 目标，启动器写进去的东西下一次装模就会被换回去），
+/// `mods/mods.json` 才是统一入口与启动器共用的开关。只有后者在场，勾才是「改了算数」的。
 fn client_mods(root: &Root) -> ClientMods {
-    let dir = config::client_dir(root).join(".115us-mods");
-    let manifest = dir.join("plugins.json");
+    let client = config::client_dir(root);
+    let dir = client.join(".115us-mods");
+    let switch_dir = client.join("mods");
+    let host = read_plugin_file(&dir.join("plugins.json"));
+    let switches = read_plugin_file(&switch_dir.join("mods.json"));
+    let loader = read_loader_status(&switch_dir);
     let present = dir.is_dir();
-    let parsed: Option<PluginFile> = fs::read_to_string(&manifest)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok());
+    let switchable = matches!(switches.0, ManifestState::Present);
+    let host_reduced = is_reduced_host_manifest(&host.1);
+
+    let mut bypass_note = String::new();
+    if switchable && matches!(host.0, ManifestState::Present) && !host_reduced {
+        bypass_note = "宿主清单不是缩减版（mod-loader 之外还有声明，或没关 autoDiscover/recurse）：\
+                       这些插件仍会被宿主直接装上，开关会被绕过。"
+            .to_string();
+    } else if switchable && !matches!(host.0, ManifestState::Present) {
+        bypass_note = "宿主清单 plugins.json 不在场或认不出形状：宿主回退旧行为，\
+                       自己把 .115us-mods 下的每个 DLL 都装上，那些开关照样被绕过\
+                       （mods 目录下的仍按开关走）。"
+            .to_string();
+    } else if !switchable && host_reduced {
+        bypass_note = "宿主清单已缩减成只加载 mod-loader，但 mods/mods.json 不在场或认不出形状：\
+                       现在客户端 mod 全都不装。先跑 analysis/tasks/mod-loader-unify-20261016 的迁移。"
+            .to_string();
+    }
+
+    let file = if switchable { switches.1 } else { host.1 };
+    let auto_discover = file.as_ref().is_some_and(|f| f.auto_discover);
+    let entries: Vec<PluginEntry> = file.map(|f| f.plugins).unwrap_or_default();
+    // 状态文件跟着 DLL 住，而两份清单的路径口径不同，先归一成一个口径。
+    let base = client.clone();
+    let declared_rel: Vec<String> = entries
+        .iter()
+        .map(|e| norm_rel(&entry_rel(switchable, &e.path)))
+        .collect();
 
     let mut plugins: Vec<ClientPlugin> = Vec::new();
-    let mut auto_discover = false;
-    if let Some(file) = parsed {
-        auto_discover = file.auto_discover;
-        for entry in file.plugins {
-            let status = read_status(&dir, &entry.name);
-            plugins.push(ClientPlugin {
-                id: entry.name,
-                dll: base_name(&entry.path),
-                in_manifest: true,
-                enabled: entry.enabled,
-                deps: entry.deps,
-                ready: status.0,
-                reject_reason: status.1,
-            });
+    for entry in entries {
+        let rel = entry_rel(switchable, &entry.path);
+        let status = read_status(
+            &base.join(rel_dir(&rel)),
+            &status_names(&entry.name, &base_name(&rel)),
+        );
+        let (loaded, load_note, start_return) = loader.row_of(&entry.name);
+        plugins.push(ClientPlugin {
+            dll: base_name(&rel),
+            id: entry.name,
+            in_manifest: true,
+            enabled: entry.enabled,
+            deps: entry.deps,
+            description: pick_description(&rel, &entry.description),
+            loaded,
+            load_note,
+            start_return,
+            ready: status.0,
+            reject_reason: status.1,
+        });
+    }
+
+    // 文件在场但清单里没列的 DLL：统一入口只补 `mods\<子目录>\` 这一种，
+    // `.115us-mods\` 下的清单外文件在缩减之后是**没人装卸**的（等于被静默关掉）。
+    for rel in scan_plugin_dlls(&client, switchable) {
+        if declared_rel.contains(&norm_rel(&rel)) {
+            continue;
         }
-        // 文件在场但清单里没列的 DLL 走自动发现：它照样会被加载，漏报等于骗人。
-        for dll in dlls_in(&dir) {
-            if plugins.iter().any(|p| p.dll == dll) {
-                continue;
-            }
-            plugins.push(ClientPlugin {
-                id: format!("（清单外）{dll}"),
-                dll,
-                in_manifest: false,
-                enabled: auto_discover,
-                deps: Vec::new(),
-                ready: None,
-                reject_reason: String::new(),
-            });
-        }
+        let status = read_status(&base.join(rel_dir(&rel)), &status_names("", &base_name(&rel)));
+        let enabled = if switchable {
+            // 缩减清单之后宿主不再扫这个根：只有 mods\ 的子目录会被统一入口补装。
+            auto_discover && !rel_in_legacy_root(&rel)
+        } else {
+            !matches!(host.0, ManifestState::Present) || auto_discover
+        };
+        let (extra_loaded, extra_note, extra_return) =
+            loader.row_of(&stem_of(&base_name(&rel)));
+        plugins.push(ClientPlugin {
+            dll: base_name(&rel),
+            id: stem_of(&base_name(&rel)),
+            in_manifest: false,
+            enabled,
+            deps: Vec::new(),
+            description: pick_description(&rel, ""),
+            loaded: extra_loaded,
+            load_note: extra_note,
+            start_return: extra_return,
+            ready: status.0,
+            reject_reason: status.1,
+        });
     }
     plugins.sort_by(|a, b| a.dll.cmp(&b.dll));
 
-    let host_log = config::client_dir(root).join("client-host.log");
+    let host_log = client.join("client-host.log");
     ClientMods {
         dir: dir.display().to_string(),
         present,
+        manifest: host.0,
         auto_discover,
+        switches: switches.0,
+        switch_dir: switch_dir.display().to_string(),
+        switchable,
+        bypass_note,
+        loader,
         plugins,
         host_tail: tail_lines(&host_log, 6),
         host_log: host_log.display().to_string(),
+    }
+}
+/// 内置中文功能提示。键是 `.115us-mods` 下 DLL 文件名的小写形。
+///
+/// 每一条取自插件自己日志里的首轮陈述，不是从文件名猜的。`mods/mods.json` 里的
+/// `description` 是同一批文案，但界面以这张表为准 —— 迁移脚本没跑、或那份清单被
+/// 人改过的时候，提示照样在。
+const PLUGIN_DESCRIPTIONS: [(&str, &str); 13] = [
+    (
+        "apocalypsenativehard.dll",
+        "末世录·原生整块硬补丁：等 waiting-panel 与 native-source 就绪后按段下钩，各段计数写在 apocalypse-native-hard.log",
+    ),
+    (
+        "apocalypsewaitingpanel.dll",
+        "末世录关底撤退面板：面板线程冻结不可用时它自己会禁用，panels 计数在 apocalypse-waiting-panel.log",
+    ),
+    (
+        "apocalypsenativesourceprobe.dll",
+        "末世录原生数据来源探针：给整块硬补丁供数据，它没就绪时硬补丁会明确拒绝下钩而不是半套生效",
+    ),
+    (
+        "apocalypsethirdcard.dll",
+        "末世录第三档机制候选：默认 enabled=false 且 entrypoint=false，只加载不启动",
+    ),
+    (
+        "cnfontraster.dll",
+        "宋体等宽光栅化 r3：family14 的 11~24 号由比例转等宽，原头顶插件、字体字节、加载标志、度量、图层与设置全部保留",
+    ),
+    (
+        "chineseinputprobe.dll",
+        "中文输入只观察探针：不碰输入法也不改键盘布局，只在聊天框打字时记录；日志很大，看完就可以删",
+    ),
+    (
+        "elitecompanionpilot.dll",
+        "精锐同伴·累计 R3 补丁 + r6 诊断观察者：图形失败与 C++ 异常按原路抛出；ModStart 实测约 10.3 秒，关掉它能省这段等待",
+    ),
+    (
+        "headtextupscale.dll",
+        "头顶与主菜单文字增强 r5：十处带守卫的调用，教程按键走原生层排除，只放大菜单字体",
+    ),
+    (
+        "localdungeonexit.dll",
+        "本地副本回城 r14：仅普通副本空闲时接管 action 22/30，结算权限不变",
+    ),
+    (
+        "localfeatures.dll",
+        "累计 R3 本地功能：NPC 菜单路由（角色 535/536/537，原生 538 保留）、道具使用路由、原生背包路由、Ctrl+F10 旧控制器",
+    ),
+    (
+        "robotnativeai.dll",
+        "女圣职者三觉背景绘制层 r34-render2 + 假人原生 AI 驱动：启动前逐字节核对，不符就整体停用而不是半套生效",
+    ),
+    (
+        "robotobjectauthority.dll",
+        "假人技能对象控制权 r30 effects1：type3/4 与经核对的假人父体 type17 权限适配器，原生门槛条件保留",
+    ),
+    (
+        "weaponskinanimation.dll",
+        "武器幻化动画 r1：只在原生动画/扩展作用域内改，作用域外的装备与属性调用不变；ModStart 实测约 3.0 秒",
+    ),
+];
+
+/// 统一入口这个根之外，存量插件住的根。
+const LEGACY_ROOT: &str = ".115us-mods";
+/// 启动器与统一入口共用的家：新 mod 导到这里，一个 mod 一个目录。
+const SWITCH_ROOT: &str = "mods";
+
+fn read_plugin_file(path: &Path) -> (ManifestState, Option<PluginFile>) {
+    let Ok(text) = fs::read_to_string(path) else {
+        return (ManifestState::Missing, None);
+    };
+    // BOM 会要命：统一入口自己跳得掉，serde 不掉。
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    match serde_json::from_str::<PluginFile>(text) {
+        Ok(file) => (ManifestState::Present, Some(file)),
+        Err(_) => (ManifestState::Corrupt, None),
+    }
+}
+
+/// 宿主清单是不是「只声明 mod-loader、并且关掉 recurse 与 autoDiscover」的缩减版。
+/// 这三条少一条，存量插件就会被宿主绕过开关直接装上。
+fn is_reduced_host_manifest(file: &Option<PluginFile>) -> bool {
+    let Some(file) = file.as_ref() else {
+        return false;
+    };
+    !file.auto_discover
+        && !file.recurse
+        && file.plugins.len() == 1
+        && base_name(&file.plugins[0].path).eq_ignore_ascii_case("mod-loader.dll")
+        && file.plugins[0].enabled
+}
+
+fn rel_in_legacy_root(rel: &str) -> bool {
+    norm_rel(rel).starts_with(&format!("{LEGACY_ROOT}/"))
+}
+
+/// 清单项的 `path` 归一成「相对客户端目录、用 `/`」这一个口径。
+///
+/// 宿主那份相对 `.115us-mods`（host 直接拼 `%s\\%s\\%s`），统一入口那份相对客户端目录。
+/// 不归一，状态文件就会跟着错的目录去找。
+fn entry_rel(switchable: bool, path: &str) -> String {
+    let unified = path.replace('\\', "/");
+    if switchable {
+        unified
+    } else {
+        format!("{LEGACY_ROOT}/{unified}")
+    }
+}
+
+/// `mods/mods.json` 到底有没有人读 —— 也就是勾是不是改了算数。
+///
+/// 宿主扫不到 `mods\`，所以只有统一入口跑起来，这份清单才生效：DLL 要在场，
+/// 且宿主没在自己的清单里显式禁用它。没清单、清单认不出形状、缩减版这三种都会加载它
+/// （前两种走自动发现，最后一种走显式声明）。
+fn loader_will_run(client: &Path) -> bool {
+    let legacy = client.join(LEGACY_ROOT);
+    if !legacy.join("mod-loader.dll").is_file() {
+        return false;
+    }
+    let read = read_plugin_file(&legacy.join("plugins.json")).1;
+    !read.is_some_and(|file| {
+        file.plugins
+            .iter()
+            .any(|e| base_name(&e.path).eq_ignore_ascii_case("mod-loader.dll") && !e.enabled)
+    })
+}
+
+/// `\` 与 `/` 同一个口径，大小写不敏感 —— 跟统一入口的 `same_rel_path` 一致，
+/// 否则启动器写 `/` 会被当成「清单外文件」再报一条。
+fn norm_rel(rel: &str) -> String {
+    rel.replace('\\', "/").to_lowercase()
+}
+
+/// 相对路径里除去最后一段的那部分（`.115us-mods/A.dll` → `.115us-mods`）。
+fn rel_dir(rel: &str) -> String {
+    let normalized = rel.replace('\\', "/");
+    match normalized.rsplit_once('/') {
+        Some((head, _)) => head.to_string(),
+        None => String::new(),
+    }
+}
+
+fn pick_description(rel: &str, from_file: &str) -> String {
+    let dll = base_name(rel).to_lowercase();
+    PLUGIN_DESCRIPTIONS
+        .iter()
+        .find(|(name, _)| *name == dll)
+        .map(|(_, text)| text.to_string())
+        .unwrap_or_else(|| from_file.to_string())
+}
+
+/// 盘上实扫：这一层该被装卸的每一枚 DLL，返回相对客户端目录、用 `/` 的路径。
+///
+/// 缩减清单之后，`.115us-mods\` 下的清单外文件没人扫（宿主的 autoDiscover 被关），
+/// 所以这里必须扫出来给界面报警，否则「盘上有、界面没」就等于静默关掉一台插件。
+fn scan_plugin_dlls(client: &Path, switchable: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    for dll in dlls_in(&client.join(LEGACY_ROOT)) {
+        if dll.eq_ignore_ascii_case("mod-loader.dll") {
+            continue;
+        }
+        out.push(format!("{LEGACY_ROOT}/{dll}"));
+    }
+    if !switchable {
+        return out;
+    }
+    let Ok(entries) = fs::read_dir(client.join(SWITCH_ROOT)) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().map(|v| v.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        for dll in dlls_in(&path) {
+            out.push(format!("{SWITCH_ROOT}/{name}/{dll}"));
+        }
+    }
+    out
+}
+
+fn read_loader_status(switch_dir: &Path) -> LoaderStatus {
+    let path = switch_dir.join("mod-loader.status.json");
+    let Some(text) = fs::read_to_string(&path).ok() else {
+        return LoaderStatus::default();
+    };
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let Ok(file) = serde_json::from_str::<LoaderStatusFile>(text) else {
+        return LoaderStatus::default();
+    };
+    LoaderStatus {
+        seen: true,
+        ready: file.ready,
+        reject_reason: file.reject_reason,
+        declared: file.declared,
+        started: file.started,
+        failed: file.failed,
+        rows: file
+            .mods
+            .into_iter()
+            .map(|row| {
+                (
+                    row.id.to_lowercase(),
+                    row.loaded,
+                    row.fail,
+                    row.returned,
+                )
+            })
+            .collect(),
+    }
+}
+
+impl LoaderStatus {
+    /// 按登记名取统一入口报的实装结果；没这一条就是 `None`（它没装卸过这个名）。
+    fn row_of(&self, id: &str) -> (Option<bool>, String, u32) {
+        let key = id.to_lowercase();
+        match self.rows.iter().find(|(seen, _, _, _)| *seen == key) {
+            Some((_, loaded, fail, returned)) => {
+                (Some(*loaded), fail.clone(), *returned)
+            }
+            None => (None, String::new(), 0),
+        }
     }
 }
 
@@ -517,6 +881,48 @@ fn base_name(path: &str) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string())
+}
+
+fn stem_of(file_name: &str) -> String {
+    Path::new(file_name)
+        .file_stem()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file_name.to_string())
+}
+
+/// 状态文件由插件自己挑名字，宿主与清单都不管。先认清单名，再认 DLL 文件名的短横线小写形
+/// 式 —— 清单名与文件名对不上是盘上实况（`apocalypse-native-whole-hard` 写的是
+/// `apocalypse-native-hard.status.json`），只认清单名会把那份自检结果整个读丢。
+fn status_names(name: &str, path: &str) -> Vec<String> {
+    let dll = base_name(path);
+    let stem = stem_of(&dll);
+    let mut names: Vec<String> = Vec::new();
+    for candidate in [name.to_string(), kebab(&stem)] {
+        if !candidate.is_empty() && !names.contains(&candidate) {
+            names.push(candidate);
+        }
+    }
+    names
+}
+
+/// `ApocalypseNativeHard` → `apocalypse-native-hard`、`CNFontRaster` → `cn-font-raster`。
+/// 连续大写只在后面接小写时才断词，否则 `CNFont` 会被拆成 `c-n-font`。
+fn kebab(stem: &str) -> String {
+    let chars: Vec<char> = stem.chars().collect();
+    let mut out = String::new();
+    for (index, ch) in chars.iter().enumerate() {
+        let break_before = index > 0
+            && ch.is_uppercase()
+            && (!chars[index - 1].is_uppercase()
+                || chars
+                    .get(index + 1)
+                    .is_some_and(|next| next.is_lowercase()));
+        if break_before {
+            out.push('-');
+        }
+        out.extend(ch.to_lowercase());
+    }
+    out
 }
 
 fn dlls_in(dir: &Path) -> Vec<String> {
@@ -536,15 +942,17 @@ fn dlls_in(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-fn read_status(dir: &Path, id: &str) -> (Option<bool>, String) {
-    let path = dir.join(format!("{id}.status.json"));
-    let Ok(text) = fs::read_to_string(&path) else {
-        return (None, String::new());
-    };
-    match serde_json::from_str::<PluginStatus>(&text) {
-        Ok(status) => (status.ready, status.reject_reason),
-        Err(_) => (None, String::new()),
+fn read_status(dir: &Path, names: &[String]) -> (Option<bool>, String) {
+    for name in names {
+        let path = dir.join(format!("{name}.status.json"));
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Ok(status) = serde_json::from_str::<PluginStatus>(&text) {
+            return (status.ready, status.reject_reason);
+        }
     }
+    (None, String::new())
 }
 
 fn tail_lines(path: &Path, count: usize) -> Vec<String> {
@@ -662,5 +1070,574 @@ fn valid_mod_id(value: &str) -> bool {
         && value.chars().all(|ch| {
             ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.' || ch == '-'
         })
+}
+
+/// 勾/撤一个客户端插件：写 `mods/mods.json` 里那一条的 `enabled`。
+///
+/// 为什么写这份而不是宿主的 `plugins.json`：那份归 modkit 所有（它是
+/// `qol.r7-runtime-repair` 的 file.replace 目标），下一次装那个 mod 就连同开关一起被换回去。
+/// 读改成 `Value` 上原地改一个字段再整体写回：清单里别人加的键不该被这一勾弄丢。
+pub fn set_client_mod_enabled(root: &Root, id: &str, enabled: bool) -> Result<String, String> {
+    let path = client_switch_file(root);
+    let text = fs::read_to_string(&path)
+        .map_err(|err| format!("mods.json 读不动（{}）：{err}", path.display()))?;
+    let stripped = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let mut value: serde_json::Value = serde_json::from_str(stripped)
+        .map_err(|err| format!("mods.json 解析不了，启动器拒绝覆盖：{err}"))?;
+    let rows = value
+        .get_mut("plugins")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| "mods.json 里没有 plugins 数组，启动器拒绝改写".to_string())?;
+    let row = rows
+        .iter_mut()
+        .find(|row| {
+            row.get("name")
+                .and_then(|v| v.as_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case(id))
+        })
+        .ok_or_else(|| {
+            format!(
+                "「{id}」不在 mods.json 里：清单外的文件是统一入口自动发现补上的，开关打不动它。\
+                 要能关就得把它写进清单（重跑 analysis/tasks/mod-loader-unify-20261016）"
+            )
+        })?;
+    let in_legacy = row
+        .get("path")
+        .and_then(|v| v.as_str())
+        .is_some_and(rel_in_legacy_root);
+    row["enabled"] = serde_json::Value::Bool(enabled);
+    write_json_atomic(&path, &value)?;
+
+    let client = config::client_dir(root);
+    let mut message = format!(
+        "已{}客户端 mod「{id}」（{}）",
+        if enabled { "启用" } else { "停用" },
+        path.display()
+    );
+    let host = read_plugin_file(&client.join(LEGACY_ROOT).join("plugins.json"));
+    let reduced = matches!(host.0, ManifestState::Present) && is_reduced_host_manifest(&host.1);
+    if !loader_will_run(&client) {
+        message.push_str(
+            " —— 注意：统一入口跑不起来（.115us-mods\\mod-loader.dll 不在场或被宿主清单禁用），\
+             这份 mods.json 现在没人读。先跑 analysis/tasks/mod-loader-unify-20261016",
+        );
+    } else if in_legacy && !reduced {
+        message.push_str(" —— 注意：宿主清单不是缩减版，这件存量 DLL 会被宿主自己装上，开关被绕过");
+    }
+    message.push_str("。开关下次启动客户端才生效：清单只在启动时读一次，装进来的模块被 PIN 到进程结束");
+    Ok(message)
+}
+
+const IMPORT_SIZE_LIMIT: u64 = 64 * 1024 * 1024;
+
+/// 导入一个 mod 目录：整份拷进 `<客户端>\mods\<mod-id>\` 并登记进 `mods.json`。
+///
+/// 只拷，不搬：源目录留在原处，导入失败不至于把别人的东西弄丢。
+pub fn import_client_mod(root: &Root, source: &Path) -> Result<String, String> {
+    let client = config::client_dir(root);
+    let mods_dir = client.join(SWITCH_ROOT);
+    let source = source
+        .canonicalize()
+        .map_err(|err| format!("源目录读不动：{err}"))?;
+    if !source.is_dir() {
+        return Err("导入要选的是一个 mod 目录，不是一个文件".to_string());
+    }
+    if let Ok(client_real) = client.canonicalize() {
+        if source.starts_with(&client_real) {
+            return Err("这个目录已经在客户端里了，不需要导入（它本来就在那两个根之下）".to_string());
+        }
+    }
+    let name = source
+        .file_name()
+        .map(|v| v.to_string_lossy().into_owned())
+        .ok_or_else(|| "源目录没有名字，取不到 mod id".to_string())?;
+    let id = kebab(&name).to_lowercase();
+    if !valid_mod_id(&id) {
+        return Err(format!(
+            "目录名「{name}」转不成合法 mod id（{id}）：只允许小写字母、数字、点与短横线；先把目录改个名再导入"
+        ));
+    }
+    let target = mods_dir.join(&id);
+    if target.exists() {
+        return Err(format!(
+            "已经导入过同名的 mod 目录：{}（要换版本请先把它删掉或改源目录名）",
+            target.display()
+        ));
+    }
+    let dlls = top_level_dlls(&source);
+    if dlls.is_empty() {
+        return Err(format!(
+            "「{name}」这一层里没有 .dll：统一入口只认 mods\\<mod-id>\\ 之下的第一层 DLL"
+        ));
+    }
+    let copied = copy_tree(&source, &target, IMPORT_SIZE_LIMIT)?;
+    register_imported(&mods_dir, &id, &dlls, copied)
+}
+
+fn top_level_dlls(dir: &Path) -> Vec<String> {
+    let mut names = dlls_in(dir);
+    names.sort();
+    names
+}
+
+/// 递归拷贝，累计字节数超上限就整份撤掉目标目录 —— 半套 mod 比没导更糟。
+fn copy_tree(from: &Path, to: &Path, limit: u64) -> Result<u64, String> {
+    fs::create_dir_all(to).map_err(|err| format!("建目标目录失败：{err}"))?;
+    let mut total = 0u64;
+    let mut stack = vec![from.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = fs::read_dir(&dir).map_err(|err| format!("读 {} 失败：{err}", dir.display()))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(from)
+                .map_err(|_| "拷贝路径跑出去了".to_string())?;
+            let dst = to.join(rel);
+            if path.is_dir() {
+                fs::create_dir_all(&dst).map_err(|err| format!("建子目录失败：{err}"))?;
+                stack.push(path);
+                continue;
+            }
+            total += fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            if total > limit {
+                let _ = fs::remove_dir_all(to);
+                return Err(format!("这个 mod 超过 {limit} 字节，不像一个 mod 目录（已撤销拷贝）"));
+            }
+            fs::copy(&path, &dst)
+                .map_err(|err| format!("拷 {} 失败：{err}", dst.display()))?;
+        }
+    }
+    Ok(total)
+}
+
+/// 把导入的 DLL 逐条登记进 `mods.json`；那份清单还不在场就新建一份，并在结论里说清楚
+/// 「没缩宿主清单之前它不会被加载」，不然玩家以为导完就生效。
+fn register_imported(mods_dir: &Path, id: &str, dlls: &[String], bytes: u64) -> Result<String, String> {
+    let path = mods_dir.join("mods.json");
+    let mut value: serde_json::Value = match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
+            .map_err(|err| format!("mods.json 解析不了，启动器拒绝覆盖：{err}"))?,
+        Err(_) => serde_json::json!({ "schema": 1, "autoDiscover": true, "plugins": [] }),
+    };
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| "mods.json 顶层不是对象，启动器拒绝改写".to_string())?;
+    let rows = root
+        .entry("plugins")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .ok_or_else(|| "mods.json 的 plugins 不是数组，启动器拒绝改写".to_string())?;
+    let mut names = Vec::new();
+    for dll in dlls {
+        let row_id = if dlls.len() == 1 {
+            id.to_string()
+        } else {
+            format!("{id}-{}", kebab(&stem_of(dll)))
+        };
+        if rows.iter().any(|row| {
+            row.get("name")
+                .and_then(|v| v.as_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case(&row_id))
+        }) {
+            return Err(format!("mods.json 里已有同名条目「{row_id}」，先人工改名"));
+        }
+        rows.push(serde_json::json!({
+            "name": row_id,
+            "path": format!("{SWITCH_ROOT}/{id}/{dll}"),
+            "description": pick_description(dll, ""),
+            "enabled": true,
+            "entrypoint": true,
+            "deps": [],
+        }));
+        names.push(row_id);
+    }
+    write_json_atomic(&path, &value)?;
+    let mut message = format!(
+        "已导入 mod「{id}」：{count} 枚 DLL、{bytes} 字节，落到 {dir}，登记为 {names}",
+        count = dlls.len(),
+        dir = mods_dir.join(id).display(),
+        names = names.join("、"),
+    );
+    let client = mods_dir.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let host = read_plugin_file(&client.join(LEGACY_ROOT).join("plugins.json"));
+    let reduced = matches!(host.0, ManifestState::Present) && is_reduced_host_manifest(&host.1);
+    if !loader_will_run(&client) {
+        message.push_str(
+            " —— .115us-mods\\mod-loader.dll 不在场或被宿主清单禁用：这份 mods.json 没人读，\
+             导入的这条要等 analysis/tasks/mod-loader-unify-20261016 跑过才会装载",
+        );
+    } else if !reduced {
+        message.push_str(
+            " —— 宿主清单不是缩减版：这条能装载，但 .115us-mods 里的存量件仍会被宿主绕过开关",
+        );
+    }
+    message.push_str("；下次启动客户端生效");
+    Ok(message)
+}
+
+fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    let tmp = path.with_extension("json.partial");
+    let text = serde_json::to_string_pretty(value).map_err(|err| err.to_string())?;
+    fs::write(&tmp, format!("{text}\n")).map_err(|err| format!("写临时文件失败：{err}"))?;
+    fs::rename(&tmp, path).map_err(|err| format!("替换 mods.json 失败：{err}"))?;
+    Ok(())
+}
+
+/// 启动器写的那份开关清单的落点。
+fn client_switch_file(root: &Root) -> std::path::PathBuf {
+    config::client_dir(root).join(SWITCH_ROOT).join("mods.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 断词规则建立在盘上真实存在的 13 个文件名上：状态文件名是插件自己挑的，
+    /// 拆错一个词，那一行的自检结果就永远读不到。
+    #[test]
+    fn kebab_matches_the_dll_names_on_disk() {
+        for (stem, want) in [
+            ("ApocalypseNativeHard", "apocalypse-native-hard"),
+            ("ApocalypseNativeSourceProbe", "apocalypse-native-source-probe"),
+            ("ApocalypseThirdCard", "apocalypse-third-card"),
+            ("ApocalypseWaitingPanel", "apocalypse-waiting-panel"),
+            ("CNFontRaster", "cn-font-raster"),
+            ("ChineseInputProbe", "chinese-input-probe"),
+            ("EliteCompanionPilot", "elite-companion-pilot"),
+            ("HeadTextUpscale", "head-text-upscale"),
+            ("LocalDungeonExit", "local-dungeon-exit"),
+            ("LocalFeatures", "local-features"),
+            ("RobotNativeAI", "robot-native-ai"),
+            ("RobotObjectAuthority", "robot-object-authority"),
+            ("WeaponSkinAnimation", "weapon-skin-animation"),
+        ] {
+            assert_eq!(kebab(stem), want, "{stem} 拆词不对");
+        }
+    }
+
+    /// 盘上实况：清单名 `apocalypse-native-whole-hard`，插件写的是
+    /// `apocalypse-native-hard.status.json`。只认清单名会把这份自检整个读丢。
+    #[test]
+    fn status_file_is_found_by_the_dll_name_when_the_manifest_name_differs() {
+        let dir = std::env::temp_dir().join(format!("dfo-mods-status-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("临时目录");
+        std::fs::write(
+            dir.join("apocalypse-native-hard.status.json"),
+            r#"{"ready":false,"rejectReason":"native-waiting-provider-not-ready"}"#,
+        )
+        .expect("造状态文件");
+        let names = status_names("apocalypse-native-whole-hard", "ApocalypseNativeHard.dll");
+        let found = read_status(&dir, &names);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found.0, Some(false));
+        assert_eq!(found.1, "native-waiting-provider-not-ready");
+    }
+
+    /// 清单名与文件名主干都能对上时不要重复查，也不要把空名字当成候选。
+    #[test]
+    fn status_candidates_are_deduped_and_never_empty() {
+        let names = status_names("local-features", "LocalFeatures.dll");
+        assert_eq!(names, vec!["local-features".to_string()]);
+        assert!(!status_names("", "CNFontRaster.dll").contains(&String::new()));
+    }
+
+    /// 宿主把「没有清单」和「清单认不出形状」都当成没有清单，于是盘上每个 DLL 都被加载。
+    /// 这时页面若因为读不到清单而一片空白，就是让玩家以为客户端一侧没装东西。
+    /// 全程在临时目录里造整合包骨架，不碰真包。
+    #[test]
+    fn dlls_on_disk_are_listed_even_when_the_manifest_is_gone_or_corrupt() {
+        let dir =
+            std::env::temp_dir().join(format!("dfo-mods-manifest-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let plugins_dir = dir.join("client").join(".115us-mods");
+        std::fs::create_dir_all(&plugins_dir).expect("临时插件目录");
+        std::fs::create_dir_all(dir.join("server")).expect("临时 server 目录");
+        for dll in ["CNFontRaster.dll", "FakePlugin.dll"] {
+            std::fs::write(plugins_dir.join(dll), b"not a real dll").expect("造 DLL 占位");
+        }
+        let quoted = dir.join("client").display().to_string().replace('\\', "\\\\");
+        std::fs::write(
+            dir.join("server").join("launcher.local.json"),
+            format!("{{\"client_dir\": \"{quoted}\"}}"),
+        )
+        .expect("造 launcher.local.json");
+        let root = Root {
+            path: dir.clone(),
+            source: "test",
+        };
+
+        let bare = client_mods(&root);
+        assert!(matches!(bare.manifest, ManifestState::Missing));
+        assert_eq!(bare.plugins.len(), 2, "没有清单时盘上 DLL 都要列出来");
+        assert!(bare
+            .plugins
+            .iter()
+            .all(|p| !p.in_manifest && p.enabled && p.id == stem_of(&p.dll)));
+        // 状态文件按文件名主干找得到，清单缺席也不能把自检丢掉。
+        std::fs::write(
+            plugins_dir.join("cn-font-raster.status.json"),
+            r#"{"ready":false,"rejectReason":"face mismatch"}"#,
+        )
+        .expect("造状态文件");
+        let with_status = client_mods(&root);
+        let raster = with_status
+            .plugins
+            .iter()
+            .find(|p| p.dll == "CNFontRaster.dll")
+            .expect("CNFontRaster 在列");
+        assert_eq!(raster.ready, Some(false));
+        assert_eq!(raster.reject_reason, "face mismatch");
+
+        std::fs::write(plugins_dir.join("plugins.json"), b"{ not json").expect("写坏清单");
+        let corrupt = client_mods(&root);
+        assert!(matches!(corrupt.manifest, ManifestState::Corrupt));
+        assert_eq!(corrupt.plugins.len(), 2, "清单认不出时照样按盘上列");
+
+        std::fs::write(
+            plugins_dir.join("plugins.json"),
+            r#"{"autoDiscover":false,"plugins":[{"name":"fake-plugin","path":"FakePlugin.dll","enabled":false}]}"#,
+        )
+        .expect("写真清单");
+        let declared = client_mods(&root);
+        assert!(matches!(declared.manifest, ManifestState::Present));
+        assert_eq!(declared.plugins.len(), 2);
+        let fake = declared
+            .plugins
+            .iter()
+            .find(|p| p.dll == "FakePlugin.dll")
+            .expect("FakePlugin 在列");
+        assert!(fake.in_manifest && !fake.enabled, "清单里 enabled:false 要显示成没加载");
+        let raster = declared
+            .plugins
+            .iter()
+            .find(|p| p.dll == "CNFontRaster.dll")
+            .expect("CNFontRaster 在列");
+        assert!(
+            !raster.in_manifest && !raster.enabled,
+            "autoDiscover=false 时清单外不该显示成已加载"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 在临时目录里造一个整合包骨架：`server/launcher.local.json` 指过去 `client/`。
+    fn temp_pack(tag: &str) -> (Root, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("dfo-mods-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("client").join(".115us-mods")).expect("临时插件目录");
+        std::fs::create_dir_all(dir.join("server")).expect("临时 server 目录");
+        let quoted = dir.join("client").display().to_string().replace('\\', "\\\\");
+        std::fs::write(
+            dir.join("server").join("launcher.local.json"),
+            format!("{{\"client_dir\": \"{quoted}\"}}"),
+        )
+        .expect("造 launcher.local.json");
+        (Root { path: dir.clone(), source: "test" }, dir)
+    }
+
+    const REDUCED_HOST: &str = r#"{"autoDiscover":false,"recurse":false,"plugins":[
+        {"name":"mod-loader","path":"mod-loader.dll","enabled":true}]}"#;
+
+    /// 迁移之后，开关的权威是 `mods/mods.json`；`.115us-mods\` 下没被声明的 DLL
+    /// 一个都没人装卸 —— 界面必须这么说，不然玩家以为它还在跑。
+    #[test]
+    fn switches_come_from_mods_json_once_migrated() {
+        let (root, dir) = temp_pack("switches");
+        let plugins = dir.join("client").join(".115us-mods");
+        let mods = dir.join("client").join("mods");
+        std::fs::create_dir_all(mods.join("cool-mod")).expect("mods 子目录");
+        for dll in [
+            "CNFontRaster.dll",
+            "EliteCompanionPilot.dll",
+            "RobotNativeAI.dll",
+            "mod-loader.dll",
+        ] {
+            std::fs::write(plugins.join(dll), b"not a real dll").expect("造存量 DLL");
+        }
+        std::fs::write(plugins.join("plugins.json"), REDUCED_HOST).expect("写缩减宿主清单");
+        std::fs::write(mods.join("cool-mod").join("Cool.dll"), b"not a real dll").expect("造导入 DLL");
+        std::fs::write(
+            mods.join("mods.json"),
+            r#"{"schema":1,"autoDiscover":true,"plugins":[
+                {"name":"cn-font-raster","path":".115us-mods/CNFontRaster.dll","enabled":false},
+                {"name":"robot-native-ai","path":".115us-mods/RobotNativeAI.dll","enabled":true},
+                {"name":"cool-mod","path":"mods/cool-mod/Cool.dll","enabled":true,"origin":"手工导入"}]}"#,
+        )
+        .expect("写 mods.json");
+        std::fs::write(
+            mods.join("mod-loader.status.json"),
+            r#"{"schema":1,"ready":true,"rejectReason":"","declared":3,"started":2,"failed":1,
+                "mods":[{"id":"cn-font-raster","path":".115us-mods/CNFontRaster.dll","enabled":false,
+                         "loaded":false,"returned":0,"fail":""},
+                        {"id":"robot-native-ai","path":".115us-mods/RobotNativeAI.dll","enabled":true,
+                         "loaded":true,"returned":3,"fail":"ModStart=3"},
+                        {"id":"cool-mod","path":"mods/cool-mod/Cool.dll","enabled":true,
+                         "loaded":false,"returned":0,"fail":"LoadLibrary 126"}]}"#,
+        )
+        .expect("写统一入口状态");
+
+        let state = client_mods(&root);
+        assert!(state.switchable, "mods.json 在场时开关该可用");
+        assert!(state.bypass_note.is_empty(), "缩减版宿主清单不该报警：{}", state.bypass_note);
+        assert!(state.loader.seen, "统一入口的自证状态要读到");
+
+        let raster = state.plugins.iter().find(|p| p.dll == "CNFontRaster.dll").expect("在列");
+        assert!(!raster.enabled, "mods.json 里的 enabled:false 要显示成关掉");
+        assert!(raster.description.contains("宋体等宽光栅化"), "内置说明要在：{}", raster.description);
+
+        let cool = state.plugins.iter().find(|p| p.dll == "Cool.dll").expect("导入的在列");
+        assert!(cool.enabled && cool.in_manifest);
+        assert_eq!(cool.loaded, Some(false), "统一入口报的是没装上");
+        assert_eq!(cool.load_note, "LoadLibrary 126");
+
+        // 装进进程 ≠ 在干活：入口调 `ModStart` 拿到非 0，说明 DLL 自己拒绝启动，
+        // 这条必须带着返回码外传，否则界面只会显示「上次启动确实装上了」。
+        let ai = state
+            .plugins
+            .iter()
+            .find(|p| p.dll == "RobotNativeAI.dll")
+            .expect("在列");
+        assert_eq!(ai.loaded, Some(true), "入口确实把它 LoadLibrary 成功了");
+        assert_eq!(ai.start_return, 3, "非 0 返回码不能被吞掉");
+        assert_eq!(ai.load_note, "ModStart=3");
+
+        let dark = state
+            .plugins
+            .iter()
+            .find(|p| p.dll == "EliteCompanionPilot.dll")
+            .expect("清单外文件也要列出来");
+        assert!(!dark.in_manifest && !dark.enabled, "缩减之后没人扫这个根，不能显示成已加载");
+        assert!(!dark.description.is_empty(), "清单外的件也该有内置说明");
+        assert!(!state.plugins.iter().any(|p| p.dll == "mod-loader.dll"), "统一入口自己不是 mod");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// 宿主清单已经缩减、但 mods.json 不在场：这时候客户端 mod 一个都不装，
+    /// 页面必须直接说出来并指回迁移脚本，不能让玩家以为「跟以前一样」。
+    #[test]
+    fn reduced_host_manifest_without_mods_json_says_everything_is_dark() {
+        let (root, dir) = temp_pack("dark");
+        let plugins = dir.join("client").join(".115us-mods");
+        std::fs::write(plugins.join("CNFontRaster.dll"), b"not a real dll").expect("造 DLL");
+        std::fs::write(plugins.join("plugins.json"), REDUCED_HOST).expect("写缩减清单");
+        let state = client_mods(&root);
+        assert!(!state.switchable);
+        assert!(state.bypass_note.contains("mod-loader-unify-20261016"), "{}", state.bypass_note);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// mods.json 在场、宿主清单却不是缩减版（比如那个 mod 被重装过）：开关会被绕过。
+    #[test]
+    fn full_host_manifest_beside_mods_json_warns_about_bypass() {
+        let (root, dir) = temp_pack("bypass");
+        let plugins = dir.join("client").join(".115us-mods");
+        std::fs::create_dir_all(dir.join("client").join("mods")).expect("mods 目录");
+        std::fs::write(
+            plugins.join("plugins.json"),
+            r#"{"autoDiscover":true,"recurse":true,"plugins":[
+                {"name":"mod-loader","path":"mod-loader.dll","enabled":true},
+                {"name":"other","path":"Other.dll","enabled":true}]}"#,
+        )
+        .expect("写全量宿主清单");
+        std::fs::write(
+            dir.join("client").join("mods").join("mods.json"),
+            r#"{"schema":1,"plugins":[{"name":"other","path":".115us-mods/Other.dll","enabled":false}]}"#,
+        )
+        .expect("写 mods.json");
+        let state = client_mods(&root);
+        assert!(state.switchable);
+        assert!(state.bypass_note.contains("绕过"), "{}", state.bypass_note);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// 改一条开关只能动那一个字段：清单里别人写的键（导入来源、说明）不能在这一勾里丢掉。
+    #[test]
+    fn switch_write_keeps_unknown_keys_and_refuses_unknown_names() {
+        let (root, dir) = temp_pack("write");
+        let mods = dir.join("client").join("mods");
+        let plugins = dir.join("client").join(".115us-mods");
+        std::fs::create_dir_all(&mods).expect("mods 目录");
+        // 迁移后的正常态：宿主只声明统一入口，统一入口自己也在场，这一勾才是「改了算数」。
+        std::fs::write(plugins.join("plugins.json"), REDUCED_HOST).expect("写缩减清单");
+        std::fs::write(plugins.join("mod-loader.dll"), b"not a real dll").expect("造统一入口");
+        let path = mods.join("mods.json");
+        std::fs::write(
+            &path,
+            r#"{"schema":1,"autoDiscover":true,"plugins":[
+                {"name":"cn-font-raster","path":".115us-mods/CNFontRaster.dll","enabled":true,
+                 "origin":"手工导入","description":"自定义文案"}]}"#,
+        )
+        .expect("写 mods.json");
+        let message = set_client_mod_enabled(&root, "cn-font-raster", false).expect("改得动");
+        assert!(
+            message.contains("停用") && message.contains("下次启动客户端才生效"),
+            "{message}"
+        );
+        assert!(!message.contains("注意"), "缩减清单 + 统一入口在场时不该报警：{message}");
+        let text = std::fs::read_to_string(&path).expect("读回来");
+        assert!(text.contains("\"origin\": \"手工导入\""), "未知键被弄丢了：{text}");
+        assert!(text.contains("\"enabled\": false"), "开关没落盘：{text}");
+        assert!(text.contains("自定义文案"), "说明被弄丢了：{text}");
+        let err = set_client_mod_enabled(&root, "no-such-mod", true).unwrap_err();
+        assert!(err.contains("不在 mods.json 里"), "{err}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// 导入 = 选一个 mod 目录 → 整份拷进 `mods/<mod-id>/` 并逐条登记。
+    #[test]
+    fn import_copies_the_folder_and_registers_each_dll() {
+        let (root, dir) = temp_pack("import");
+        let outer = std::env::temp_dir().join(format!("dfo-mods-src-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        let source = outer.join("MyMod");
+        std::fs::create_dir_all(source.join("data")).expect("源子目录");
+        std::fs::write(source.join("My.dll"), b"not a real dll").expect("造 DLL");
+        std::fs::write(source.join("data").join("note.txt"), b"hello").expect("造附属文件");
+
+        let message = import_client_mod(&root, &source).expect("导入成功");
+        let target = dir.join("client").join("mods").join("my-mod");
+        assert!(target.join("My.dll").is_file() && target.join("data").join("note.txt").is_file(),
+                "附属文件要跟着拷：{}", target.display());
+        let text = std::fs::read_to_string(dir.join("client").join("mods").join("mods.json"))
+            .expect("登记写出来了");
+        assert!(text.contains("mods/my-mod/My.dll"), "{text}");
+        assert!(text.contains("\"autoDiscover\": true"), "新建清单要带自动发现：{text}");
+        assert!(message.contains("mod-loader.dll 不在场"), "没迁移时要讲清楚不会装载：{message}");
+        let err = import_client_mod(&root, &source).unwrap_err();
+        assert!(err.contains("已经导入过同名"), "{err}");
+        let _ = std::fs::remove_dir_all(outer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// 内置说明表的键必须钉在盘上真实文件名上：拼错一个字母，那一行就永远没提示。
+    #[test]
+    fn description_table_covers_every_client_dll() {
+        let on_disk: Vec<String> = [
+            "ApocalypseNativeHard",
+            "ApocalypseNativeSourceProbe",
+            "ApocalypseThirdCard",
+            "ApocalypseWaitingPanel",
+            "CNFontRaster",
+            "ChineseInputProbe",
+            "EliteCompanionPilot",
+            "HeadTextUpscale",
+            "LocalDungeonExit",
+            "LocalFeatures",
+            "RobotNativeAI",
+            "RobotObjectAuthority",
+            "WeaponSkinAnimation",
+        ]
+        .iter()
+        .map(|stem| format!("{}.dll", stem.to_lowercase()))
+        .collect();
+        for name in &on_disk {
+            assert!(
+                PLUGIN_DESCRIPTIONS.iter().any(|(key, _)| key == name),
+                "「{name}」没有内置说明"
+            );
+            assert!(!pick_description(name, "").is_empty(), "「{name}」的说明是空的");
+        }
+        assert_eq!(PLUGIN_DESCRIPTIONS.len(), on_disk.len(), "表里多了一条不存在的件");
+    }
 }
 

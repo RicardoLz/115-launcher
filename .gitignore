@@ -22,6 +22,10 @@ src-tauri/gen/schemas
 vibe_images/
 *.tmp
 
+# 编译时随手重定向的 stdout/stderr，只在本机看
+build-log.txt
+check-err.txt
+
 # 图标母图（入库的是 src-tauri/icons/ 里的生成物）
 app-icon.png
 

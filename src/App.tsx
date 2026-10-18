@@ -26,6 +26,8 @@ import {
   type Phase,
   type PortReport,
   type Readiness,
+  type SelfUpdateCheck,
+  type ServerUpdateCheck,
   type Status,
 } from "./bridge";
 
@@ -61,6 +63,13 @@ export default function App() {
   );
   // 首次的上传范围说明：一次会话只问一遍，没答就下次再问，不替玩家默认打开。
   const [consentDone, setConsentDone] = useState(false);
+  // 启动时后台探测到可更新的服务端：弹层问要不要现在更。
+  const [updatePrompt, setUpdatePrompt] = useState<ServerUpdateCheck | null>(null);
+  // 启动器自身更新提示。
+  const [selfUpdatePrompt, setSelfUpdatePrompt] = useState<SelfUpdateCheck | null>(null);
+  const [checkingSelfUpdate, setCheckingSelfUpdate] = useState(false);
+  // 部署中（首次部署 / 更新部署）的状态文字，显示在顶部状态栏。
+  const [deployLabel, setDeployLabel] = useState<string | null>(null);
   const { theme, toggleTheme } = useTheme();
   /// 停靠层把命中测试借出来：独立窗口拖回来时按落点挑吸附槽。
   const hitRef = useRef<((x: number, y: number) => Zone | null) | null>(null);
@@ -135,31 +144,34 @@ export default function App() {
           setPortHint(blocked.hint);
           setSheet("ports");
         }),
+        events.onFirstRunNoServer(() => {
+          // 首次部署：先弹原生目录选择框让用户选 DFO.exe，选完自动下载服务端。
+          setDeployLabel("首次部署中");
+          (async () => {
+            try {
+              await commands.pickClientDir();
+              await loadConfig();
+              const rec = await commands.serverUpdateApply();
+              flash(rec.message);
+            } catch (err) {
+              flash(`首次部署失败：${errText(err)}`, "err");
+            } finally {
+              setDeployLabel(null);
+              void refresh();
+            }
+          })();
+        }),
+        events.onServerUpdateAvailable((info) => {
+          setUpdatePrompt(info);
+        }),
       ]);
       if (alive) stops.push(...got);
       else got.forEach((stop) => stop());
     };
 
-    // 四件事各自落各自的 state：一条命令失败或卡住，不该把首屏其余三块一起带走。
-    const boot = () => {
-      const take = <T,>(task: Promise<T>, put: (value: T) => void) => {
-        task.then(
-          (value) => {
-            if (alive) put(value);
-          },
-          (err: unknown) => {
-            if (alive) flash(errText(err), "err");
-          },
-        );
-      };
-      take(commands.appInfo(), setInfo);
-      take(commands.status(), setStatus);
-      take(commands.readiness(), setReadiness);
-      take(commands.config(), setConfig);
-    };
-
-    // 事件订阅失败也不能拦住首屏：数据是盘上事实，通知只是锦上添花。
-    bind().then(boot, boot);
+    // 首屏那几件不再等这里：七个 listen() 里任何一个不落地，那批数据就永远不会发出去，
+    // 页脚的「整合包：…」会一直停在 `??` 兜底上。事件订阅自己收尾即可。
+    void bind();
 
     const poll = window.setInterval(() => void refresh(), 4000);
     return () => {
@@ -169,6 +181,36 @@ export default function App() {
       if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
     };
   }, [refresh, flash, dockBack]);
+
+  // 首屏四件各拉一次、各自落各自的 state：一条命令失败或卡住，不该把其余三块一起带走。
+  // 单独立一条 effect 是有意的 —— 它原先挂在上面那条的 `bind()` 之后，订阅没落地就整批不发。
+  useEffect(() => {
+    let alive = true;
+    const take = <T,>(task: Promise<T>, put: (value: T) => void) => {
+      task.then(
+        (value) => {
+          if (alive) put(value);
+        },
+        (err: unknown) => {
+          if (alive) flash(errText(err), "err");
+        },
+      );
+    };
+    take(commands.appInfo(), setInfo);
+    take(commands.status(), setStatus);
+    take(commands.readiness(), setReadiness);
+    take(commands.config(), setConfig);
+    // 启动器自身更新：探测失败就当没有，不打扰玩家。
+    commands
+      .selfUpdateCheck()
+      .then((r) => {
+        if (alive && r.has_update) setSelfUpdatePrompt(r);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [flash]);
 
   // 点标题栏的关闭：先问三选一，别把环境丢在那儿就走。
   useEffect(() => {
@@ -293,6 +335,18 @@ export default function App() {
       await commands.quit(choice);
     });
 
+  const applyPromptedUpdate = async () => {
+    if (!updatePrompt) return;
+    setUpdatePrompt(null);
+    setDeployLabel("更新部署中");
+    await act("更新服务端", async () => {
+      const rec = await commands.serverUpdateApply();
+      flash(rec.message);
+    });
+    setDeployLabel(null);
+    void refresh();
+  };
+
   const busy = working || status.phase === "starting" || status.phase === "stopping";
   const running = status.phase === "running";
   const canStart = readiness?.can_start ?? false;
@@ -319,6 +373,12 @@ export default function App() {
             >
               网关 7001 {readiness?.gateway_listening ? "已监听" : "空闲"}
             </span>
+            {deployLabel ? (
+              <span className="chip" data-tone="busy">
+                <i className="spin" />
+                {deployLabel}
+              </span>
+            ) : null}
             <span className="spacer" />
             {page === "home" ? (
               <>
@@ -327,6 +387,24 @@ export default function App() {
                 </button>
                 <button className="btn" onClick={openPorts}>
                   端口与残留
+                </button>
+                <button
+                  className="btn"
+                  disabled={checkingSelfUpdate}
+                  onClick={async () => {
+                    setCheckingSelfUpdate(true);
+                    try {
+                      const info = await commands.selfUpdateCheck();
+                      if (info.has_update) setSelfUpdatePrompt(info);
+                      else flash(`当前已是最新（v${info.current_version}）`);
+                    } catch (err) {
+                      flash(`检查更新失败：${errText(err)}`, "err");
+                    } finally {
+                      setCheckingSelfUpdate(false);
+                    }
+                  }}
+                >
+                  {checkingSelfUpdate ? "检查中…" : "检查更新"}
                 </button>
               </>
             ) : null}
@@ -519,6 +597,88 @@ export default function App() {
 
       {showConsent ? (
         <ReportConsentSheet onChoose={chooseConsent} onLater={() => setConsentDone(true)} />
+      ) : null}
+
+      {updatePrompt ? (
+        <div className="scrim">
+          <div className="sheet sheet--narrow" role="dialog" aria-modal="true">
+            <header className="sheet-head">
+              <h3>发现服务端新版本</h3>
+              <span className="spacer" />
+            </header>
+            <div className="sheet-body">
+              <p className="hint">
+                最新版本：<strong>{updatePrompt.latest_tag}</strong>
+                <br />
+                本机版本：{updatePrompt.current_tag ?? "未部署"}
+                <br />
+                包大小：{(updatePrompt.asset_size / 1048576).toFixed(1)} MB
+                <br />
+                更新会自动选最快镜像下载，保留存档。建议先停止游戏再更新。
+              </p>
+              <div className="row">
+                <button className="btn" onClick={() => setUpdatePrompt(null)}>
+                  稍后再说
+                </button>
+                <button
+                  className="btn"
+                  data-tone="accent"
+                  disabled={working || status.phase === "running"}
+                  onClick={() => void applyPromptedUpdate()}
+                  title={status.phase === "running" ? "请先停止游戏" : ""}
+                >
+                  立即更新
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selfUpdatePrompt ? (
+        <div className="scrim">
+          <div className="sheet sheet--narrow" role="dialog" aria-modal="true">
+            <header className="sheet-head">
+              <h3>启动器有新版本</h3>
+              <span className="spacer" />
+            </header>
+            <div className="sheet-body">
+              <p className="hint">
+                当前版本：<strong>v{selfUpdatePrompt.current_version}</strong>
+                <br />
+                最新版本：<strong>v{selfUpdatePrompt.latest_version}</strong>
+                <br />
+                包大小：{(selfUpdatePrompt.asset_size / 1048576).toFixed(1)} MB
+                <br />
+                更新后启动器会自动重启。
+              </p>
+              <div className="row">
+                <button className="btn" onClick={() => setSelfUpdatePrompt(null)}>
+                  稍后再说
+                </button>
+                <button
+                  className="btn"
+                  data-tone="accent"
+                  onClick={async () => {
+                    const info = selfUpdatePrompt;
+                    setSelfUpdatePrompt(null);
+                    try {
+                      await commands.selfUpdateApply(info);
+                      // bat 脚本已启动，等它接管
+                      setTimeout(() => {
+                        void commands.quit("keep");
+                      }, 1500);
+                    } catch (err) {
+                      flash(`更新失败：${errText(err)}`, "err");
+                    }
+                  }}
+                >
+                  立即更新
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {notice ? (

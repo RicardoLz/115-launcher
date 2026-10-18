@@ -10,7 +10,7 @@
 //!
 //! 本模块不注入客户端、不装驱动，只做系统级模拟输入。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -31,8 +31,15 @@ const HOLD_GRACE: Duration = Duration::from_millis(150);
 const TICK: Duration = Duration::from_millis(2);
 /// 前台进程判定的刷新周期。
 const SCAN_INTERVAL: Duration = Duration::from_millis(500);
-/// 同一类诊断话的最短间隔：旧版引擎也是 3 秒节流，刷屏比没反馈更糟。
+/// 同一类诊断话的最短间隔：连发本身是按秒计的事，全部转成日志会把运行日志冲烂。
 const DIAG_GAP: Duration = Duration::from_secs(3);
+/// 诊断环形上限。节拍线程每 200ms 就抽一次，正常跑根本到不了这个数；
+/// 到了就是抽的人也没了（线程被系统掐之类），此时丢最老的、但把丢过的句数记下来。
+const DIAG_RING: usize = 64;
+/// 诊断落日志的周期。不等界面轮询：页面没开着也得留下一场能对账的日志。
+const FLUSH_GAP: Duration = Duration::from_millis(200);
+/// 一场实况摘要行的间隔：只记闸门与计数，不记每一次按键。
+const LIVE_GAP: Duration = Duration::from_secs(15);
 const HOTKEY_ID: i32 = 1;
 /// 配置改了就请监听线程重挂总开关热键（RegisterHotKey 必须在建它的那个线程上做）。
 const WM_REREG_HOTKEY: u32 = 0x8001;
@@ -378,7 +385,9 @@ struct Live {
     skip_focus: u64,
     skip_master: u64,
     diag: Vec<String>,
-    diag_at: Option<Instant>,
+    diag_at: HashMap<&'static str, Instant>,
+    diag_drops: u64,
+    noted: Instant,
 }
 
 impl Default for Live {
@@ -404,7 +413,9 @@ impl Default for Live {
             skip_focus: 0,
             skip_master: 0,
             diag: Vec::new(),
-            diag_at: None,
+            diag_at: HashMap::new(),
+            diag_drops: 0,
+            noted: Instant::now(),
         }
     }
 }
@@ -414,18 +425,26 @@ fn lock(live: &Arc<Mutex<Live>>) -> MutexGuard<'_, Live> {
     live.lock().unwrap_or_else(|err| err.into_inner())
 }
 
-/// 记一句诊断。同一类话 3 秒内只留一句，最多攒 8 句：连发本身是按秒计的事，
-/// 全部转成日志会把运行日志冲烂，反倒看不出第一条卡在哪。
-fn note_diag(guard: &mut Live, text: String) {
+/// 记一句诊断。节流**按类别各一份**：六个类别共用一个闸门时，谁先到就谁能把其余五类
+/// 全屏掉——「游戏不在前台」会把同 3 秒里的第一条发送失败盖掉，实机最难归因的正是那条
+/// （2026-10-16 复盘）。同一类仍然 3 秒最多一句。
+fn note_diag(guard: &mut Live, kind: &'static str, text: String) {
     let now = Instant::now();
-    if let Some(at) = guard.diag_at {
-        if now.duration_since(at) < DIAG_GAP {
+    if let Some(at) = guard.diag_at.get(kind) {
+        if now.duration_since(*at) < DIAG_GAP {
             return;
         }
     }
-    guard.diag_at = Some(now);
-    if guard.diag.len() >= 8 {
+    guard.diag_at.insert(kind, now);
+    push_line(guard, text);
+}
+
+/// 诊断进环形。到顶丢最老的一句，并把「丢过几句」记进 `diag_drops`：
+/// 抽日志的人不在了，也得让日志说自己少了几句，不能装什么都没发生。
+fn push_line(guard: &mut Live, text: String) {
+    if guard.diag.len() >= DIAG_RING {
         guard.diag.remove(0);
+        guard.diag_drops += 1;
     }
     guard.diag.push(text);
 }
@@ -460,16 +479,30 @@ pub struct State {
 #[derive(Clone, Debug, Serialize)]
 pub struct EntryLiveList(pub Vec<EntryLive>);
 
+/// 诊断与实况的落点。这里刻意只收一个「把一句话交出去」的闭包，不收日志器的类型：
+/// 引用 `crate::logbus::Bus` 会把整条 tauri 窗口链（muda 菜单、wry、comctl32 v6 的
+/// `SetWindowSubclass`/`TaskDialogIndirect`）拖进本模块的单测可执行文件里，
+/// 而那些符号只有 Common-Controls v6 才导出，测试进程直接以 STATUS_ENTRYPOINT_NOT_FOUND 死在装载阶段。
+pub type LogLine = Arc<dyn Fn(String) + Send + Sync>;
+
 #[derive(Default)]
 pub struct Engine {
     live: Arc<Mutex<Live>>,
     keep_up: Arc<AtomicBool>,
     handles: Mutex<Vec<JoinHandle<()>>>,
+    /// 运行日志的入口。启动器建好日志器后 `attach_log` 接上；没接上时诊断照样攒在环形里，
+    /// 只是不落盘——单元测试走的就是这一条。
+    log: Arc<Mutex<Option<LogLine>>>,
 }
 
 impl Engine {
     pub fn new() -> Self {
         Engine::default()
+    }
+
+    /// 接上运行日志：诊断与实况由引擎自己的线程写，不靠界面轮询。
+    pub fn attach_log(&self, sink: LogLine) {
+        *held(&self.log) = Some(sink);
     }
 
     /// 与旧版一致的语义：`enabled=true` 才真的挂监听；已经开着再改配置，只换内容不动热键开关。
@@ -483,6 +516,20 @@ impl Engine {
             self.stop();
             Ok("连发已停用，监听已摘掉".to_string())
         }
+    }
+
+    /// 界面那个开关点的就是这里：把总开关直接设成开或关，跟按一下热键落到同一个状态。
+    /// 没在跑的时候不受理——那时「开」意味着挂监听，得走 `apply`。
+    pub fn set_master(&self, on: bool) -> Result<State, String> {
+        let mut guard = lock(&self.live);
+        if !guard.running {
+            return Err("连发没在跑，先把「启用连发」保存并生效".to_string());
+        }
+        if guard.master != on {
+            guard.master = on;
+            push_flip(&mut guard, "界面里点的");
+        }
+        Ok(view(&guard))
     }
 
     pub fn start(&self, mut cfg: Config) -> Result<String, String> {
@@ -507,6 +554,8 @@ impl Engine {
             let mut guard = lock(&self.live);
             fill(&mut guard, &cfg, master_vk, Some(tx));
             guard.running = true;
+            // `enabled=true` 存成开：界面那个开关点的就是这里，热键翻的也是这里。
+            // 装载时留一个「关」会让「点开关→进游戏按热键」变成两步，玩家看不出差别。
             guard.master = true;
             guard.hotkey_error = String::new();
             // 计数从这一场重新起算：界面上的数字要能对上「这一次到底收没收到键」。
@@ -517,12 +566,15 @@ impl Engine {
             guard.skip_focus = 0;
             guard.skip_master = 0;
             guard.diag.clear();
-            guard.diag_at = None;
+            guard.diag_at.clear();
+            guard.diag_drops = 0;
+            guard.noted = Instant::now();
         }
         self.keep_up.store(true, Ordering::SeqCst);
 
         let live = Arc::clone(&self.live);
         let keep_up = Arc::clone(&self.keep_up);
+        let log = Arc::clone(&self.log);
         let mut handles = lock_handles(&self.handles);
         handles.push(spawn("af-listener", live.clone(), keep_up.clone(), move |live, keep_up| {
             listener_loop(live, keep_up)
@@ -530,8 +582,11 @@ impl Engine {
         handles.push(spawn("af-sender", live.clone(), keep_up.clone(), move |live, keep_up| {
             sender_loop(live, keep_up)
         }));
-        handles.push(spawn("af-player", live, keep_up, move |live, keep_up| {
+        handles.push(spawn("af-player", live.clone(), keep_up.clone(), move |live, keep_up| {
             player_loop(live, keep_up, rx)
+        }));
+        handles.push(spawn("af-flush", live, keep_up, move |live, keep_up| {
+            flusher_loop(live, keep_up, log)
         }));
         drop(handles);
 
@@ -552,7 +607,7 @@ impl Engine {
             format!("；{}", guard.hotkey_error)
         };
         Ok(format!(
-            "连发已启用：热键 {} 开关，共 {} 条{}",
+            "连发已开启：热键 {} 按一下即关，共 {} 条{}",
             guard.cfg.hotkey,
             guard.cfg.entries.len(),
             note
@@ -593,10 +648,18 @@ impl Engine {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
+        // 摘钩那几毫秒攒下的话还没落盘就把进程收了，日志里正好缺最该看的一条。
+        flush_diag(&self.log, &self.live);
     }
 
     pub fn state(&self) -> State {
-        let guard = lock(&self.live);
+        view(&lock(&self.live))
+    }
+}
+
+/// 把引擎里的运行态抄一份给界面。锁已经在调用手上，这里只读。
+fn view(guard: &Live) -> State {
+    {
         let mut entries: Vec<EntryLive> = Vec::new();
         for rapid in &guard.rapids {
             entries.push(EntryLive {
@@ -634,12 +697,9 @@ impl Engine {
             skip_master: guard.skip_master,
         }
     }
+}
 
-    /// 取走攒下的诊断话，交给运行日志。每 3 秒最多一条，界面刷屏比没反馈更糟。
-    pub fn take_diag(&self) -> Vec<String> {
-        std::mem::take(&mut lock(&self.live).diag)
-    }
-
+impl Engine {
     fn reregister_hotkey(&self) {
         let tid = lock(&self.live).listener_tid;
         #[cfg(windows)]
@@ -655,6 +715,63 @@ impl Engine {
 
 fn lock_handles(mutex: &Mutex<Vec<JoinHandle<()>>>) -> MutexGuard<'_, Vec<JoinHandle<()>>> {
     mutex.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+fn held<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+/// 攒着的诊断抽走并写进运行日志。锁只用来取走字符串，落日志那边加锁时
+/// 手上已经没有 `live` 了——钩子回调等的就是这把锁，不能替它多等一次磁盘。
+fn flush_diag(log: &Mutex<Option<LogLine>>, live: &Arc<Mutex<Live>>) {
+    let lines = std::mem::take(&mut lock(live).diag);
+    if lines.is_empty() {
+        return;
+    }
+    let Some(sink) = held(log).clone() else { return };
+    for line in lines {
+        sink(format!("[连发] {line}"));
+    }
+}
+
+/// 一场实况：三个计数各管一段，界面没人看的时候日志里也得有这行。
+/// 只在跑着的时候发，停了以后计数就不再有意义。
+fn flush_live(log: &Mutex<Option<LogLine>>, live: &Arc<Mutex<Live>>) {
+    let line = {
+        let mut guard = lock(live);
+        if !guard.running {
+            return;
+        }
+        guard.noted = Instant::now();
+        format!(
+            "实况：收到物理键 {}，注入 {}，失败 {}；焦点{}，总开关{}；挡下 开关关 {} 拍 / 不在前台 {} 拍",
+            guard.hook_events,
+            guard.sends,
+            guard.send_fails,
+            if guard.focused { "在游戏" } else { "不在" },
+            if guard.master { "开" } else { "关" },
+            guard.skip_master,
+            guard.skip_focus,
+        )
+    };
+    let Some(sink) = held(log).clone() else { return };
+    sink(format!("[连发] {line}"));
+}
+
+/// 诊断与实况的专用线程。它不碰输入、不发消息，200ms 起一次，
+/// 唯一的存在理由是把「只有界面开着才会写日志」这件事从日志链路里拿掉。
+fn flusher_loop(live: Arc<Mutex<Live>>, keep_up: Arc<AtomicBool>, log: Arc<Mutex<Option<LogLine>>>) {
+    loop {
+        if !keep_up.load(Ordering::SeqCst) {
+            break;
+        }
+        flush_diag(&log, &live);
+        if lock(&live).running && lock(&live).noted.elapsed() >= LIVE_GAP {
+            flush_live(&log, &live);
+        }
+        std::thread::sleep(FLUSH_GAP);
+    }
+    flush_diag(&log, &live);
 }
 
 /// 把配置摊成两张发送计划表。解析不出来的键直接跳过那条，不让一个坏键拖垮整份配置。
@@ -777,11 +894,10 @@ fn listener_loop(live: Arc<Mutex<Live>>, _keep_up: Arc<AtomicBool>) {
             break;
         }
         match msg.message {
-            windows::Win32::UI::WindowsAndMessaging::WM_HOTKEY => {
-                if msg.wParam.0 as i32 == HOTKEY_ID {
-                    toggle_master(&live);
-                }
-            }
+            // 这里一个字节都不做。RegisterHotKey 只负责把这个键从游戏嘴边吞掉；
+            // 翻转挂在钩子的松开边沿上——按住键时系统会每秒几十次重发 WM_HOTKEY，
+            // 挂在这里一次按键能翻七八下（2026-10-15 实机日志里 21:47:09 一秒内翻了 6 次）。
+            windows::Win32::UI::WindowsAndMessaging::WM_HOTKEY => {}
             WM_REREG_HOTKEY => register_master(&live),
             _ => {
                 unsafe {
@@ -824,35 +940,41 @@ fn register_master(live: &Arc<Mutex<Live>>) {
     }
 }
 
-/// 总开关热键走 RegisterHotKey 而不是钩子：这个键要被启动器吃掉，不该再传到游戏里。
-#[cfg(windows)]
-fn toggle_master(live: &Arc<Mutex<Live>>) {
-    let (next, mute) = {
-        let mut guard = lock(live);
-        guard.master = !guard.master;
-        // 这条不经节流：玩家刚按的那一下必须有个准信，好把「热键没绑上」和
-        // 「热键正好把它关了」这两种情况分清楚。
-        let line = format!(
-            "连发总开关{}（再按一下 {} 切回来）",
-            if guard.master { "已恢复" } else { "已暂停" },
-            guard.cfg.hotkey
-        );
-        guard.diag.push(line);
-        if guard.diag.len() > 8 {
-            guard.diag.remove(0);
-        }
-        (guard.master, guard.mute)
-    };
-    if !mute {
-        // Beep 会占住调用线程 120ms，绝不能压在监听线程上（钩子回调也在它上面跑）。
-        std::thread::spawn(move || {
-            use windows::Win32::System::Diagnostics::Debug::Beep;
-            unsafe {
-                let _ = Beep(if next { 880 } else { 587 }, 120);
-            }
-        });
-    }
+/// 翻一次总开关。调用方手上已经握着 `live` 的锁（翻转就在钩子回调里做），
+/// 所以这里只改状态、记账，一次调用恰好翻一次。
+fn flip_master(guard: &mut Live) -> bool {
+    guard.master = !guard.master;
+    let hotkey = guard.cfg.hotkey.clone();
+    // 不经节流：玩家刚按的那一下必须有个准信，好把「热键没绑上」和
+    // 「热键正好把它关了」这两种情况分清楚。
+    push_flip(guard, &format!("再按一下 {hotkey} 切回来"));
+    guard.master
 }
+
+/// 总开关换了状态就记一句：热键按的、界面点的，都从这一条出口说话。
+/// 不经节流——玩家刚按的那一下必须有个准信。
+fn push_flip(guard: &mut Live, tail: &str) {
+    let line = format!(
+        "连发总开关{}（{}）",
+        if guard.master { "已开" } else { "已关" },
+        tail
+    );
+    push_line(guard, line);
+}
+
+/// Beep 会占住调用线程 120ms，绝不能压在监听线程上（钩子回调也在它上面跑）。
+#[cfg(windows)]
+fn chirp(on: bool) {
+    std::thread::spawn(move || {
+        use windows::Win32::System::Diagnostics::Debug::Beep;
+        unsafe {
+            let _ = Beep(if on { 880 } else { 587 }, 120);
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn chirp(_on: bool) {}
 
 #[cfg(windows)]
 unsafe extern "system" fn hook_proc(
@@ -905,7 +1027,7 @@ fn note_key(live: &Arc<Mutex<Live>>, vk: u16, down: bool) {
             guard.rapids[index].release_at = None;
             if !was && guard.master {
                 let name = key_name(vk);
-                note_diag(&mut guard, format!("连发开始：{name}"));
+                note_diag(&mut guard, "start", format!("连发开始：{name}"));
             }
         }
         if guard.master {
@@ -921,6 +1043,14 @@ fn note_key(live: &Arc<Mutex<Live>>, vk: u16, down: bool) {
             }
         }
     } else {
+        // 总开关挂在松开边沿：一次按键只有一次松开，按住时系统怎么重发都翻不动它。
+        // RegisterHotKey 照旧绑着，剩下的作用只是把这个键从游戏嘴边吞掉。
+        if vk == guard.master_vk {
+            let next = flip_master(&mut guard);
+            if !guard.mute {
+                chirp(next);
+            }
+        }
         for rapid in guard.rapids.iter_mut() {
             if rapid.vk == vk && rapid.held {
                 rapid.release_at = Some(now + HOLD_GRACE);
@@ -953,15 +1083,34 @@ fn sender_loop(live: Arc<Mutex<Live>>, keep_up: Arc<AtomicBool>) {
     }
 }
 
-/// 2ms 一次的节拍：松手判定 → 抬起收尾 → 该按的下一下。全程不睡、不等待，锁只在毫秒级持有。
+/// 2ms 一次的节拍：松手判定 → 抬起收尾 → 该按的下一下。
+///
+/// 锁只在毫秒级持有，而且**绝不攥着锁干慢事**：整机进程枚举和 `SendInput` 都排在锁外。
+/// 钩子回调 `note_key` 等的就是这把锁，Windows 又要求钩子尽快返回——在这里边枚举边注入，
+/// 玩家按下的每一个键都得排队，看上去就是「松开连发键之后别的键失灵、热键关掉也慢半拍」。
 fn tick(live: &Arc<Mutex<Live>>) {
     let now = Instant::now();
+
+    // 只问一句「该不该重扫」，要扫的进程名也一并取走，枚举本身在锁外跑。
+    let targets = {
+        let guard = lock(live);
+        if guard.running && now.duration_since(guard.scanned) >= SCAN_INTERVAL {
+            guard.cfg.targets.clone()
+        } else {
+            Vec::new()
+        }
+    };
+    let scan = (!targets.is_empty()).then(|| scan_focus(&targets));
+
     let mut guard = lock(live);
     if !guard.running {
         return;
     }
-    if now.duration_since(guard.scanned) >= SCAN_INTERVAL {
-        refresh_focus(&mut guard);
+    if let Some(found) = scan {
+        guard.pids = found.pids;
+        guard.focused = found.foreground != 0 && guard.pids.contains(&found.foreground);
+        // 扫完才落时间戳：慢的那一段已经过去了，下一拍不必再替它等。
+        guard.scanned = Instant::now();
     }
     let active = guard.master && guard.focused;
 
@@ -970,16 +1119,16 @@ fn tick(live: &Arc<Mutex<Live>>) {
         if !guard.master {
             guard.skip_master += 1;
             let hotkey = guard.cfg.hotkey.clone();
-            note_diag(&mut guard, format!("总开关关着，连发没发送：按一下 {hotkey} 恢复"));
+            note_diag(&mut guard, "gate-master", format!("总开关关着，连发没发送：按一下 {hotkey} 开"));
         } else {
             guard.skip_focus += 1;
             let targets = guard.cfg.targets.join("、");
-            note_diag(&mut guard, format!("游戏不在前台，连发没发送：找的是 {targets}"));
+            note_diag(&mut guard, "gate-focus", format!("游戏不在前台，连发没发送：找的是 {targets}"));
         }
     }
 
-    let mut sent = 0_u64;
-    let mut fail: Option<String> = None;
+    // 先只把这一拍要做的动作排成清单：排的时候动状态，不碰键盘。
+    let mut plan: Vec<(usize, u16, bool)> = Vec::new();
     for index in 0..guard.rapids.len() {
         if let Some(at) = guard.rapids[index].release_at {
             if now >= at {
@@ -994,43 +1143,59 @@ fn tick(live: &Arc<Mutex<Live>>) {
                 // 连发变成压键，间隔配得再小也没用。
                 let tapped = now.duration_since(since) >= guard.rapids[index].hold;
                 if !guard.rapids[index].held || !active || tapped {
-                    match release_key(vk) {
-                        Ok(()) => {
-                            guard.rapids[index].phase = Phase::Idle;
-                            sent += 1;
-                        }
-                        // 抬起都没送出去，说明这一下根本没进系统：收摊等下一次按下边沿。
-                        Err(msg) => {
-                            guard.rapids[index].held = false;
-                            guard.rapids[index].phase = Phase::Idle;
-                            fail = Some(msg);
-                        }
-                    }
+                    plan.push((index, vk, true));
                 }
             }
             Phase::Idle if !guard.rapids[index].held || !active => {
                 guard.rapids[index].cycle_at = None;
             }
             Phase::Idle => {
-                let due = guard.rapids[index]
+                let cycle_due = guard.rapids[index]
                     .cycle_at
                     .map(|at| now.duration_since(at) >= guard.rapids[index].interval)
                     .unwrap_or(true);
-                if due {
-                    match press_key(vk) {
-                        Ok(()) => {
-                            guard.rapids[index].phase = Phase::Down(now);
-                            guard.rapids[index].cycle_at = Some(now);
-                            guard.rapids[index].taps += 1;
-                            sent += 1;
-                        }
-                        // 发不出去（通常是权限）就别再原地反复试，等这一轮松手。
-                        Err(msg) => {
-                            guard.rapids[index].held = false;
-                            fail = Some(msg);
-                        }
-                    }
+                if cycle_due {
+                    plan.push((index, vk, false));
                 }
+            }
+        }
+    }
+    drop(guard);
+
+    // 注入排在锁外：SendInput 要等目标线程把输入吃下去，游戏正忙时能卡上一截，
+    // 这一截不该顺手把钩子一起拖住。
+    let tried: Vec<(usize, bool, Option<String>)> = plan
+        .into_iter()
+        .map(|(index, vk, up)| (index, up, send_scan(vk, up).err()))
+        .collect();
+
+    let mut guard = lock(live);
+    let mut sent = 0_u64;
+    let mut fail: Option<String> = None;
+    for (index, up, err) in tried {
+        // 放锁的这几毫秒里配置可能被重灌（连发条目换了），按下标回写前先确认这条还在。
+        let Some(rapid) = guard.rapids.get_mut(index) else { continue };
+        match (up, err) {
+            (false, None) => {
+                rapid.phase = Phase::Down(now);
+                rapid.cycle_at = Some(now);
+                rapid.taps += 1;
+                sent += 1;
+            }
+            (true, None) => {
+                rapid.phase = Phase::Idle;
+                sent += 1;
+            }
+            // 发不出去（通常是权限）就别再原地反复试，等这一轮松手。
+            (false, Some(msg)) => {
+                rapid.held = false;
+                fail = Some(msg);
+            }
+            // 抬起都没送出去，说明这一下根本没进系统：收摊等下一次按下边沿。
+            (true, Some(msg)) => {
+                rapid.held = false;
+                rapid.phase = Phase::Idle;
+                fail = Some(msg);
             }
         }
     }
@@ -1038,34 +1203,42 @@ fn tick(live: &Arc<Mutex<Live>>) {
     if let Some(msg) = fail {
         guard.send_fails += 1;
         guard.last_fail = msg.clone();
-        note_diag(&mut guard, msg);
+        note_diag(&mut guard, "fail", msg);
     }
 }
 
+/// 焦点扫描：整机进程枚举 + 前台窗口归属，返回（认到的 PID 集合、前台窗口归属 PID）。
+/// **调用方手上不许握着 `live` 的锁**——这两件事的耗时都得安排在钩子等得起的地方，
+/// 不然钩子回调拿不到锁、按键被系统判成超时丢弃，玩家看到的就是整机键盘发僵。
 #[cfg(windows)]
-fn refresh_focus(guard: &mut Live) {
+fn scan_focus(targets: &[String]) -> Scan {
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
-    guard.scanned = Instant::now();
     let pids: HashSet<u32> = crate::procutil::snapshot()
         .into_iter()
-        .filter(|entry| guard.cfg.targets.iter().any(|t| t == &entry.name))
+        .filter(|entry| targets.iter().any(|t| t == &entry.name))
         .map(|entry| entry.pid)
         .collect();
-    guard.pids = pids;
-    let mut foreground = 0_u32;
     let hwnd = unsafe { GetForegroundWindow() };
+    let mut foreground = 0_u32;
     unsafe {
         GetWindowThreadProcessId(hwnd, Some(&mut foreground));
     }
-    guard.focused = foreground != 0 && guard.pids.contains(&foreground);
+    Scan { pids, foreground }
+}
+
+/// 重扫焦点那一拍的成果：认到的进程，和当前前台窗口属于谁。
+struct Scan {
+    pids: HashSet<u32>,
+    foreground: u32,
 }
 
 #[cfg(not(windows))]
-fn refresh_focus(guard: &mut Live) {
-    guard.scanned = Instant::now();
-    guard.pids.clear();
-    guard.focused = false;
+fn scan_focus(_targets: &[String]) -> Scan {
+    Scan {
+        pids: HashSet::new(),
+        foreground: 0,
+    }
 }
 
 #[cfg(windows)]
@@ -1157,8 +1330,8 @@ fn player_loop(live: Arc<Mutex<Live>>, keep_up: Arc<AtomicBool>, rx: mpsc::Recei
 }
 
 /// 记一句诊断（自己取锁）：钩子、节拍、连招三条线都要能说话。
-fn note_line(live: &Arc<Mutex<Live>>, msg: String) {
-    note_diag(&mut lock(live), msg);
+fn note_line(live: &Arc<Mutex<Live>>, kind: &'static str, msg: String) {
+    note_diag(&mut lock(live), kind, msg);
 }
 
 /// 注入失败必须落进诊断：这种话只有玩家看得见，不写就是无声失败。
@@ -1166,7 +1339,7 @@ fn note_fail(live: &Arc<Mutex<Live>>, msg: String) {
     let mut guard = lock(live);
     guard.send_fails += 1;
     guard.last_fail = msg.clone();
-    note_diag(&mut guard, msg);
+    note_diag(&mut guard, "fail", msg);
 }
 
 /// 一套连招单独跑一个线程：它要按节奏睡，绝不能压在 2ms 的节拍线程上。
@@ -1194,7 +1367,7 @@ fn play_combo(live: &Arc<Mutex<Live>>, index: usize) {
         };
         // 每一动之前重看闸门：中途关了或切了窗口就停在这儿，打一半比整套没打更容易送人头。
         if let Some(reason) = gate {
-            note_line(live, format!("一键连招中断：{reason}"));
+            note_line(live, "combo", format!("一键连招中断：{reason}"));
             break;
         }
         if let Err(msg) = press_key(vk) {
@@ -1347,5 +1520,83 @@ mod tests {
                 guard.diag
             );
         }
+    }
+
+    #[test]
+    fn master_hotkey_flips_once_per_press_even_when_held() {
+        let live = Arc::new(Mutex::new(Live::default()));
+        {
+            let mut guard = lock(&live);
+            guard.running = true;
+            guard.mute = true;
+            guard.master_vk = 0x79;
+            guard.cfg.hotkey = "F10".to_string();
+        }
+        assert!(!lock(&live).master, "没装载成运行态之前不该显示成开");
+        for _ in 0..30 {
+            note_key(&live, 0x79, true);
+        }
+        assert!(!lock(&live).master, "按住时系统会重发按下边沿，一个都不许翻");
+        note_key(&live, 0x79, false);
+        assert!(lock(&live).master, "一次按键只有一次松开，松开该翻");
+        let lines = lock(&live).diag.clone();
+        assert_eq!(lines.len(), 1, "翻转只能留一条：{:?}", lines);
+        assert!(lines[0].contains("已开"), "报的是反向状态：{:?}", lines);
+        note_key(&live, 0x53, false);
+        assert!(lock(&live).master, "别的键松开不该顺手翻开关");
+    }
+
+    #[test]
+    fn ui_switch_and_hotkey_share_one_state() {
+        let engine = Engine::new();
+        // 没在跑的时候不受理：那时「开」意味着挂键盘监听，得走 apply。
+        assert!(engine.set_master(true).is_err());
+
+        let live = Arc::clone(&engine.live);
+        {
+            let mut guard = lock(&live);
+            guard.running = true;
+            guard.master = true;
+            guard.mute = true;
+            guard.master_vk = 0x79;
+            guard.cfg.hotkey = "F10".to_string();
+        }
+        let view = engine.set_master(false).expect("在跑就该受理");
+        assert!(!view.master, "界面点关，抄出来的状态就得是关");
+        assert!(
+            lock(&live).diag.iter().any(|line| line.contains("界面里点的")),
+            "点的来路要写进日志：{:?}",
+            lock(&live).diag
+        );
+        // 同一个状态再被热键翻一次：界面下一秒轮到的就是这个值。
+        note_key(&live, 0x79, false);
+        assert!(engine.state().master, "热键和界面翻的是同一个开关");
+    }
+
+    #[test]
+    fn one_kind_of_diagnostic_must_not_mask_another() {
+        // 共用一个节流闸门时的真实形状：先记「游戏不在前台」，同 3 秒里的第一条发送失败
+        // 就被吞掉了——而那条才是「发不出去」的唯一证据。
+        let live = Arc::new(Mutex::new(Live::default()));
+        note_diag(&mut lock(&live), "gate-focus", "游戏不在前台，连发没发送".to_string());
+        note_diag(&mut lock(&live), "fail", "注入失败：Access is denied".to_string());
+        let lines = lock(&live).diag.clone();
+        assert_eq!(lines.len(), 2, "两类话各留一句，谁也别挡谁：{:?}", lines);
+        // 同一类仍然节流：按住键的那几秒不能把日志冲烂。
+        note_diag(&mut lock(&live), "fail", "注入失败：Access is denied".to_string());
+        assert_eq!(lock(&live).diag.len(), 2, "同一类 3 秒内只许一句");
+    }
+
+    #[test]
+    fn dropped_diagnostics_are_counted_not_silent() {
+        let live = Arc::new(Mutex::new(Live::default()));
+        let over = DIAG_RING + 6;
+        for index in 0..over {
+            push_line(&mut lock(&live), format!("第 {index} 句"));
+        }
+        let guard = lock(&live);
+        assert_eq!(guard.diag.len(), DIAG_RING, "环形该封在上限上");
+        assert_eq!(guard.diag_drops, 6, "丢过的句数要能说出来，不能装没发生");
+        assert_eq!(guard.diag.first().unwrap(), "第 6 句", "丢的是最老的");
     }
 }

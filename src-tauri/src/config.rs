@@ -71,20 +71,35 @@ fn section_mut<'a>(root: &'a mut Value, key: &str) -> &'a mut Map<String, Value>
 
 // ---------------------------------------------------------------- 客户端目录
 
-/// 解析 `client_dir`（相对基准是 `<root>/server`）。
-pub fn client_dir(root: &Root) -> PathBuf {
+/// 配置里写死的那份客户端目录。认不认由 `has_client_files` 判：写着空白、指向已经不在的
+/// 目录、或指到一个不像客户端的地方，都算没配 —— 那种值继续生效只会让页面一片空白。
+pub fn stored_client_dir(root: &Root) -> Option<PathBuf> {
     let value = read_json(&root.launcher_local_json());
     let configured = value
         .get("client_dir")
         .and_then(Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| DEFAULT_CLIENT_REL.to_string());
-    let path = PathBuf::from(&configured);
-    if path.is_absolute() {
+        .map(str::trim)
+        .filter(|text| !text.is_empty())?;
+    let path = PathBuf::from(configured);
+    let resolved = if path.is_absolute() {
         paths::squash(&path)
     } else {
-        paths::squash(&root.path.join("server").join(path))
-    }
+        paths::squash(&root.path.join("server").join(configured))
+    };
+    has_client_files(&resolved).then_some(resolved)
+}
+
+/// 解析客户端目录（相对基准是 `<root>/server`）。
+///
+/// 配置不认时**必须**退回 `discover_client` 的候选，不能直接吐历史默认值：`DEFAULT_CLIENT_REL`
+/// 是 `../client`，在拆栏布局（root=`服务端`、客户端在同级 `客户端\DFO`）下根本不存在，
+/// 那样 MOD 页与健康检查会整块报「不在」，而游戏侧照样全加载。探不到才落回默认值，
+/// 让页面显示「不在」的是真不在。兜底全程只读，不写配置。
+pub fn client_dir(root: &Root) -> PathBuf {
+    stored_client_dir(root).unwrap_or_else(|| {
+        discover_client(root)
+            .unwrap_or_else(|| paths::squash(&root.path.join("server").join(DEFAULT_CLIENT_REL)))
+    })
 }
 
 pub fn set_client_dir(root: &Root, dir: &Path) -> Result<PathBuf, String> {
@@ -133,6 +148,28 @@ pub fn server_binary(root: &Root) -> PathBuf {
     } else {
         root.path.join("server").join(path)
     }
+}
+
+/// dfolauncher.exe 启动时硬性要求 `launcher.local.json` 里有 `server_binary`，
+/// 否则直接退出并报 "launcher.local.json must set server_binary"。
+/// 首次部署后这个文件可能根本不存在或缺字段，启动时幂等补一份。
+pub fn ensure_launcher_local_json(root: &Root) -> Result<(), String> {
+    let mut value = read_json(&root.launcher_local_json());
+    if !value.is_object() {
+        value = Value::Object(Map::new());
+    }
+    let need_write = {
+        let entry = value.get("server_binary").and_then(Value::as_str);
+        match entry {
+            Some(s) if !s.trim().is_empty() => false,
+            _ => true,
+        }
+    };
+    if need_write {
+        value["server_binary"] = Value::String(DEFAULT_SERVER_BINARY.to_string());
+        write_json(&root.launcher_local_json(), &value, 2)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------- 存档路由
@@ -316,4 +353,59 @@ pub fn valid_account(name: &str) -> bool {
         && bytes
             .iter()
             .all(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'-')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 拆栏布局（root=`服务端`、客户端在同级 `客户端\DFO`）下，历史默认值 `../client`
+    /// 指向一个不存在的路径。三种「配置不认」的写法都必须兜底探到真客户端 —— 否则 MOD 页
+    /// 与健康检查整块报「不在」，而游戏侧照样全加载。全程临时目录，不碰真包。
+    #[test]
+    fn an_unusable_client_dir_falls_back_to_discovery() {
+        let base = std::env::temp_dir().join(format!("dfo-config-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let client = base.join("客户端").join("DFO");
+        std::fs::create_dir_all(base.join("服务端").join("server")).expect("造 server");
+        std::fs::create_dir_all(&client).expect("造客户端目录");
+        for name in paths::CLIENT_REQUIRED_FILES {
+            std::fs::write(client.join(name), b"placeholder").expect("造必备件");
+        }
+        let root = Root {
+            path: base.join("服务端"),
+            source: "test",
+        };
+        let local = root.launcher_local_json();
+        let want = paths::squash(&client);
+
+        for (label, text) in [
+            ("配置缺席", None),
+            ("值是空白", Some(r#"{"client_dir": ""}"#)),
+            ("指向已经不存在的目录", Some(r#"{"client_dir": "../../没了的客户端/DFO"}"#)),
+        ] {
+            let _ = std::fs::remove_file(&local);
+            if let Some(text) = text {
+                std::fs::write(&local, text).expect("写 launcher.local.json");
+            }
+            assert_eq!(stored_client_dir(&root), None, "{label} 不该算已配置");
+            assert_eq!(client_dir(&root), want, "{label} 该兜底探到客户端");
+        }
+
+        // 相对与绝对两种写法都要认账，认账时不走兜底。
+        let absolute = client.display().to_string().replace('\\', "/");
+        for (label, text) in [
+            ("相对路径", r#"{"client_dir": "../../客户端/DFO"}"#.to_string()),
+            ("绝对路径", format!(r#"{{"client_dir": "{absolute}"}}"#)),
+        ] {
+            std::fs::write(&local, text).expect("写 launcher.local.json");
+            assert_eq!(
+                stored_client_dir(&root),
+                Some(want.clone()),
+                "{label} 该被认成已配置"
+            );
+            assert_eq!(client_dir(&root), want);
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

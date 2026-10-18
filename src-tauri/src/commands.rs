@@ -12,8 +12,9 @@ use crate::config::{self, valid_account};
 use crate::health;
 use crate::logbus::Line;
 use crate::mods;
-use crate::paths::{self, Root};
+use crate::paths::{self, Root, CLIENT_IMAGE_NAME};
 use crate::portguard::{self, Report};
+use crate::procutil;
 use crate::report;
 use crate::saves;
 use crate::session::{self, Mode, Phase, Readiness, Session, StartOutcome, Status};
@@ -23,7 +24,6 @@ use crate::updater;
 
 pub const APP_NAME: &str = "DFO-115US 启动器";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const APP_AUTHOR: &str = "起飞 · Kink";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -38,7 +38,6 @@ pub struct AppState {
 pub struct AppInfo {
     pub name: &'static str,
     pub version: &'static str,
-    pub author: &'static str,
     pub root: String,
     pub root_source: String,
     pub app_dir: String,
@@ -97,17 +96,18 @@ fn describe_storage(state: &config::StorageRoute) -> String {
     }
 }
 
+/// 与其余多数命令一样走 `async`：页脚的「整合包：…」一直停在 `??` 兜底上没被替换过，
+/// 而这条当时是全文件少数几条同步命令之一（另两条见 `log_snapshot`、`reports_retry`）。
 #[tauri::command]
-pub fn app_info(state: tauri::State<'_, AppState>) -> AppInfo {
-    AppInfo {
+pub async fn app_info(state: tauri::State<'_, AppState>) -> Result<AppInfo, String> {
+    Ok(AppInfo {
         name: APP_NAME,
         version: APP_VERSION,
-        author: APP_AUTHOR,
         root: state.root.path.display().to_string(),
         root_source: state.root.source.to_string(),
         app_dir: state.app_dir.display().to_string(),
         log_dir: state.session.bus().log_dir.display().to_string(),
-    }
+    })
 }
 
 #[tauri::command]
@@ -351,6 +351,56 @@ pub async fn set_server_mod(
     Ok(ActionRecord { message })
 }
 
+/// 客户端 mod 在跑的时候一律拒绝改清单：宿主与统一入口都只在启动时读一次，
+/// 而且装进来的模块被 PIN 到进程结束 —— 改了不生效，但界面勾会变，玩家会以为已经生效。
+fn client_running_note() -> Option<String> {
+    if procutil::running_named(&[CLIENT_IMAGE_NAME]).is_empty() {
+        return None;
+    }
+    Some("游戏客户端正在运行，客户端 mod 清单只在启动时读一次；请先退出游戏再改".to_string())
+}
+
+/// 勾/撤一个客户端插件 —— 写 `<客户端>/mods/mods.json` 里那一条的 `enabled`。
+#[tauri::command]
+pub async fn set_client_mod(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<ActionRecord, String> {
+    let session = state.session.clone();
+    if let Some(note) = client_running_note() {
+        return Err(note);
+    }
+    let root = state.root.clone();
+    let message = join(move || mods::set_client_mod_enabled(&root, &id, enabled)).await?;
+    session.bus().info(message.clone());
+    Ok(ActionRecord { message })
+}
+
+/// 导入一个 mod 目录：选目录 → 整份拷进 `<客户端>/mods/<mod-id>/` → 登记进 mods.json。
+#[tauri::command]
+pub async fn import_client_mod(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<ActionRecord, String> {
+    let picked = block(move || app.dialog().file().blocking_pick_folder()).await?;
+    let session = state.session.clone();
+    let Some(raw) = picked else {
+        return Err("已取消选择".to_string());
+    };
+    let path = match raw {
+        FilePath::Path(path) => path,
+        FilePath::Url(url) => return Err(format!("只能选本地目录，收到的是：{url}")),
+    };
+    if let Some(note) = client_running_note() {
+        return Err(note);
+    }
+    let root = session.root();
+    let message = join(move || mods::import_client_mod(&root, &path)).await?;
+    session.bus().info(message.clone());
+    Ok(ActionRecord { message })
+}
+
 /// 自动上报开关。开启前界面必须先展示一次上传范围说明（`prompted` 一并落盘）。
 #[tauri::command]
 pub async fn set_auto_report(
@@ -586,14 +636,26 @@ pub async fn autofire_get(state: tauri::State<'_, AppState>) -> Result<AutofireV
 }
 
 /// 本场实况：界面 1s 轮一次，够玩家看清「热键开着没 / 焦点在游戏里没 / 打了多少下」。
+/// 诊断话的落日志归引擎自己的线程管（`autofire::flusher_loop`），这里只抄状态——
+/// 以前靠这个轮询顺手抽走，页面没开着就等于那一整场什么都没记下来。
 #[tauri::command]
 pub async fn autofire_live(state: tauri::State<'_, AppState>) -> Result<autofire::State, String> {
     let engine = state.autofire.clone();
-    let (view, lines) = block(move || (engine.state(), engine.take_diag())).await?;
-    // 引擎自己的三条线（钩子 / 节拍 / 连招）不碰日志器：攒在这里，由轮询顺手转成运行日志。
-    for line in lines {
-        state.session.bus().info(line);
-    }
+    block(move || engine.state()).await
+}
+
+/// 界面那个开关点的就是引擎里的总开关，和按一下热键落到同一个状态。
+#[tauri::command]
+pub async fn autofire_set_master(
+    state: tauri::State<'_, AppState>,
+    on: bool,
+) -> Result<autofire::State, String> {
+    let session = state.session.clone();
+    let engine = state.autofire.clone();
+    let view = block(move || engine.set_master(on)).await??;
+    session
+        .bus()
+        .info(format!("连发总开关已{}（界面里点的）", if on { "开" } else { "关" }));
     Ok(view)
 }
 

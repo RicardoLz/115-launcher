@@ -23,26 +23,29 @@ mod updater;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 状态必须在建窗之前就挂上：tauri 是「按配置创建主窗 → 再跑 setup」，而命令走 async 时
+    // `State` 是在后台运行时里解引用的，界面首帧那次 `config_get` 可能落在 `app.manage` 之前，
+    // 玩家会看到「state not managed for field `state` on command `config_get`」。
+    // 所以能纯算的部分全提到这里，`AppHandle` 相关的接线留在 setup 里补。
     let exe = std::env::current_exe().ok();
     let root = paths::resolve_root(exe.as_deref());
     let app_dir = paths::app_dir();
     let bus = Bus::new(&app_dir.join("logs"));
     let reporter = report::Reporter::new(&app_dir, root.clone(), bus.clone());
+    // panic 钩子比建窗还早：这样连 builder 这一段炸了也留得下报告。
     install_panic_hook(reporter.clone(), bus.clone());
     let session = Session::new(root.clone(), bus.clone());
+    session.attach_reporter(reporter.clone());
     let autofire = std::sync::Arc::new(autofire::Engine::new());
 
-    let state = commands::AppState {
-        session: session.clone(),
-        reporter: reporter.clone(),
-        autofire: autofire.clone(),
-        app_dir: app_dir.clone(),
-        root: root.clone(),
-    };
-    let state_for_setup = state.clone();
-
     let builder = tauri::Builder::default()
-        .manage(state)
+        .manage(commands::AppState {
+            session: session.clone(),
+            reporter: reporter.clone(),
+            autofire: autofire.clone(),
+            app_dir: app_dir.clone(),
+            root: root.clone(),
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());
 
@@ -51,7 +54,6 @@ pub fn run() {
 
     builder
         .setup(move |app| {
-            app.manage(state_for_setup);
             bus.attach(app.handle().clone());
             bus.info(root.log_line());
             bus.info(format!(
@@ -72,7 +74,9 @@ pub fn run() {
 
             reporter.start();
             session.attach(app.handle().clone());
-            session.attach_reporter(reporter.clone());
+            // 连发的诊断与实况由引擎自己的线程写日志，不经过界面：工具页没开着也要留下一场能对账的。
+            let log_bus = bus.clone();
+            autofire.attach_log(std::sync::Arc::new(move |line: String| log_bus.info(line)));
 
             let app_handle = app.handle().clone();
             std::thread::spawn(move || prepare_environment(app_handle, session, autofire));
@@ -95,8 +99,11 @@ pub fn run() {
             commands::set_auto_pickup,
             commands::mods_state,
             commands::set_server_mod,
+            commands::set_client_mod,
+            commands::import_client_mod,
             commands::autofire_get,
             commands::autofire_live,
+            commands::autofire_set_master,
             commands::autofire_save,
             commands::autofire_stop,
             commands::saves_state,
@@ -191,15 +198,15 @@ fn prepare_environment(
     let bus = session.bus();
     let client_dir = config::client_dir(&root);
     if !paths::has_client_files(&client_dir) {
-        match config::discover_client(&root) {
-            Some(found) => match config::set_client_dir(&root, &found) {
-                Ok(saved) => bus.ok(format!("已识别游戏客户端：{}", saved.display())),
-                Err(err) => bus.error(format!("写入客户端目录失败：{err}")),
-            },
-            None => bus.warn("未找到游戏客户端，请在首页手动选择 DFO.exe 所在目录"),
-        }
-    } else {
+        bus.warn("未找到游戏客户端，请在首页手动选择 DFO.exe 所在目录");
+    } else if config::stored_client_dir(&root).as_deref() == Some(client_dir.as_path()) {
         bus.info(format!("游戏客户端：{}", client_dir.display()));
+    } else {
+        // 走到这一支说明用的是兜底探到的目录：落一次配置，让玩家在设置页看得见这条事实。
+        match config::set_client_dir(&root, &client_dir) {
+            Ok(saved) => bus.ok(format!("已识别游戏客户端：{}", saved.display())),
+            Err(err) => bus.error(format!("写入客户端目录失败：{err}")),
+        }
     }
 
     match config::ensure_storage_route(&root) {

@@ -252,5 +252,3 @@ src-tauri/src/       Rust 后端
 ## 许可
 
 AGPL-3.0（见 `LICENSE`）。游戏客户端、服务端与整合包内容不在本仓库的授权范围内，本许可只覆盖启动器源码。
-
-作者：起飞 · Kink（[GitHub](https://github.com/KinkOwO)）
