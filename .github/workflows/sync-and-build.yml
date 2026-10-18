@@ -43,6 +43,11 @@ jobs:
           if ($localSha -ne $upstreamSha) {
             Write-Output "New upstream commits, syncing..."
             git merge upstream/main --no-edit
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Merge with upstream/main produced conflicts. Aborting merge; resolve manually and push. No build will run."
+              git merge --abort
+              exit 1
+            }
             git push origin main
             $localSha = git rev-parse HEAD
           }
