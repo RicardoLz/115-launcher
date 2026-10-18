@@ -101,7 +101,10 @@ jobs:
         run: |
           $tag = "${{ steps.sync.outputs.tag }}".TrimStart('v')
           $parts = $tag -split '-'
-          $cargoVer = "$($parts[0]).$($parts[1]).0"
+          # parts[1] is HHmm (24h, zero-padded); cast to int so leading zeros are dropped,
+          # otherwise semver rejects e.g. "20261018.0630.0" (numeric identifiers must not
+          # have leading zeroes).
+          $cargoVer = "$($parts[0]).$([int]$parts[1]).0"
           (Get-Content "src-tauri/Cargo.toml") -replace '^version = ".*"', "version = `"$cargoVer`"" | Set-Content "src-tauri/Cargo.toml"
           (Get-Content "src-tauri/tauri.conf.json") -replace '"version": ".*"', "`"version`": `"$cargoVer`"" | Set-Content "src-tauri/tauri.conf.json"
           Write-Host "Version set to: $cargoVer"
