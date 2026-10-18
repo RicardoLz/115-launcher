@@ -2,8 +2,9 @@
 //!
 //! 规矩照旧版那条链，一步都不能省：候选先体检（文件头 + `integrity_check` + 必备表）；
 //! 替换前必把当前档快照进 `backup/` 并验这份快照；改名落地后复检。启动器不写
-//! `runtime/storage/local.json`、不碰客户端目录，删除面只限这份库自己的 sidecar，
-//! 而且非 0 字节的 `-wal` 永不动（里面可能有已提交的数据）。
+//! `runtime/storage/local.json`、不碰客户端目录。删除面只有两块：当前档自己的空 sidecar，
+//! 和 `backup/` 底下玩家点名要删的那一份 `.sqlite3`；非 0 字节的 `-wal` 永不动
+//! （里面可能有已提交的数据），当前档也永远删不掉。
 
 use std::fs::File;
 use std::io::Read;
@@ -47,6 +48,8 @@ pub struct BackupItem {
     pub note: String,
     pub accounts: usize,
     pub characters: usize,
+    /// 这一份就是当前正在用的库。界面据此把「删除」按住：坏掉的备份能删，正在用的不能。
+    pub is_current: bool,
 }
 
 #[derive(Serialize)]
@@ -303,6 +306,7 @@ fn list_backups(root: &Root, db: Option<&Path>) -> Vec<BackupItem> {
                 },
                 accounts,
                 characters,
+                is_current,
             })
         })
         .collect();
@@ -520,6 +524,64 @@ pub fn restore(root: &Root, candidate_raw: &str) -> Result<String, String> {
     }
 }
 
+/// 删掉备份目录里的一份备份。口径比替换更窄：只准落在 `backup/` 底下、必须是自己认得的
+/// `.sqlite3`、不能是当前正在用的档；旁边压着非 0 字节的日志文件就拒绝，因为那份里
+/// 可能还有没合进主库的已提交数据，删主文件等于替玩家做决定。
+pub fn delete_backup(root: &Root, candidate_raw: &str) -> Result<String, String> {
+    let raw = PathBuf::from(candidate_raw.trim());
+    if !raw.is_absolute() {
+        return Err("只能删备份目录里的文件（要绝对路径）".to_string());
+    }
+    let candidate = crate::paths::squash(&raw);
+    let dir = backup_dir(root);
+    if !candidate.starts_with(&dir) {
+        return Err(format!(
+            "只允许删 {} 底下的备份，免得误指到当前存档或别的东西",
+            dir.display()
+        ));
+    }
+    if candidate.extension().and_then(|e| e.to_str()) != Some("sqlite3") {
+        return Err(format!("{} 不是 .sqlite3 备份，启动器不删它", candidate.display()));
+    }
+    if !candidate.is_file() {
+        return Err(format!("{} 不是一个文件", candidate.display()));
+    }
+    if let Some(db) = current_db(root) {
+        if same_file(&candidate, &db) {
+            return Err(
+                "这份就是当前正在用的存档，删除按钮够不到它；要清当前档请在服务端那边处理".to_string(),
+            );
+        }
+    }
+    let base = candidate.as_os_str().to_string_lossy().to_string();
+    let holding: Vec<String> = JOURNAL_SUFFIXES
+        .iter()
+        .filter_map(|suffix| {
+            let side = PathBuf::from(format!("{base}{suffix}"));
+            let non_empty =
+                side.is_file() && std::fs::metadata(&side).map(|m| m.len() > 0).unwrap_or(false);
+            non_empty.then(|| side.display().to_string())
+        })
+        .collect();
+    if !holding.is_empty() {
+        return Err(format!(
+            "{} 旁边还压着非 0 字节的日志文件（{}），这份可能带还没合进主库的数据，先别删",
+            candidate.display(),
+            holding.join("、")
+        ));
+    }
+
+    let name = candidate
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let size = size_text(&candidate);
+    std::fs::remove_file(&candidate).map_err(|err| format!("删除失败：{err}"))?;
+    // 空 sidecar 是这条备份自己留下的壳，跟着主文件一起走；非空的上面已经拦下了。
+    sweep_empty_sidecars(&candidate);
+    Ok(format!("已删除备份「{name}」（{size}）。当前存档一个字节都没动。"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,5 +667,82 @@ mod tests {
         let second = unique_path(&dir, "dfolan", "");
         let _ = std::fs::remove_dir_all(&dir);
         assert_ne!(first, second);
+    }
+
+    /// 删除只建立在「`backup/` 底下那一层」这条路径契约上，用临时包验，不碰整合包。
+    fn temp_root(tag: &str) -> (Root, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("dfo-saves-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let root = Root {
+            path: dir.clone(),
+            source: "test",
+        };
+        std::fs::create_dir_all(backup_dir(&root)).expect("临时备份目录");
+        (root, dir)
+    }
+
+    /// 删除面必须比替换面更窄：存档目录里、备份目录外的东西一律碰不到。
+    #[test]
+    fn delete_backup_only_reaches_files_under_the_backup_dir() {
+        let (root, dir) = temp_root("del-scope");
+        let current = storage_dir(&root).join("dfolan.sqlite3");
+        std::fs::write(&current, b"x").expect("造当前档");
+        let err = delete_backup(&root, &current.to_string_lossy()).unwrap_err();
+        assert!(err.contains("只允许删"), "{err}");
+        assert!(current.is_file(), "越界的删除必须一个字节都不动");
+
+        let relative = delete_backup(&root, "backup/dfolan.sqlite3").unwrap_err();
+        assert!(relative.contains("绝对路径"), "{relative}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 当前档自己躺在 backup 里时（替换快照的常见情形），删除按钮不能把它删掉。
+    #[test]
+    fn delete_backup_refuses_the_database_in_use() {
+        let (root, dir) = temp_root("del-current");
+        let backup = backup_dir(&root).join("now-in-use.sqlite3");
+        std::fs::write(&backup, b"x").expect("造备份");
+        std::fs::create_dir_all(storage_dir(&root)).expect("存档目录");
+        let quoted = backup.display().to_string().replace('\\', "\\\\");
+        std::fs::write(
+            root.storage_local_json(),
+            format!("{{\"sqlite_path\": \"{quoted}\"}}"),
+        )
+        .expect("写 sqlite_path 指向备份里这一份");
+
+        let err = delete_backup(&root, &backup.to_string_lossy()).unwrap_err();
+        assert!(err.contains("当前正在用的存档"), "{err}");
+        assert!(backup.is_file(), "被拒时不能已经把文件删了");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 非 0 字节的 `-wal` 里可能是已提交、还没合进主库的数据，这种份先别删。
+    #[test]
+    fn delete_backup_refuses_a_non_empty_journal() {
+        let (root, dir) = temp_root("del-wal");
+        let backup = backup_dir(&root).join("with-wal.sqlite3");
+        std::fs::write(&backup, b"x").expect("造备份");
+        std::fs::write(PathBuf::from(format!("{}-wal", backup.display())), b"data").expect("造非空 wal");
+
+        let err = delete_backup(&root, &backup.to_string_lossy()).unwrap_err();
+        assert!(err.contains("非 0 字节的日志文件"), "{err}");
+        assert!(backup.is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 正常那份连带它的空 sidecar 一起清掉，别在备份目录里留孤零零的空壳。
+    #[test]
+    fn delete_backup_removes_the_file_and_its_empty_sidecars() {
+        let (root, dir) = temp_root("del-ok");
+        let backup = backup_dir(&root).join("good.sqlite3");
+        std::fs::write(&backup, b"xx").expect("造备份");
+        let shm = PathBuf::from(format!("{}-shm", backup.display()));
+        std::fs::write(&shm, b"").expect("造空 shm");
+
+        let message = delete_backup(&root, &backup.to_string_lossy()).expect("该删得动");
+        assert!(message.contains("已删除备份「good.sqlite3」"), "{message}");
+        assert!(!backup.is_file());
+        assert!(!shm.is_file(), "空 sidecar 要跟着主文件一起走");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

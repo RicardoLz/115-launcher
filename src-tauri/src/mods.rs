@@ -970,11 +970,15 @@ fn tail_lines(path: &Path, count: usize) -> Vec<String> {
     lines
 }
 
-fn modkit_mods(root: &Root) -> ModkitMods {
-    let registry = config::client_dir(root)
+/// modkit 自己的落点那一层：`registry.json` 与它放下的件都在这一层之下。
+fn modkit_dir(root: &Root) -> std::path::PathBuf {
+    config::client_dir(root)
         .join(".launcher-mods")
         .join("modkit")
-        .join("registry.json");
+}
+
+fn modkit_mods(root: &Root) -> ModkitMods {
+    let registry = modkit_dir(root).join("registry.json");
     let present = registry.is_file();
     let parsed: Option<Registry> = fs::read_to_string(&registry)
         .ok()
@@ -1286,6 +1290,164 @@ fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), Strin
 /// 启动器写的那份开关清单的落点。
 fn client_switch_file(root: &Root) -> std::path::PathBuf {
     config::client_dir(root).join(SWITCH_ROOT).join("mods.json")
+}
+
+// ---------------------------------------------------------------- 服务端 mod 导入
+
+/// 在资源管理器里打开 modkit 的落点那一层。
+///
+/// 路径由启动器自己算，界面只说「开哪一族」，不传路径 —— 免得把任意路径打开做成一条命令。
+pub fn open_modkit_dir(root: &Root) -> Result<String, String> {
+    let dir = modkit_dir(root);
+    if !dir.is_dir() {
+        return Err(format!(
+            "这一层还不在场：{}（modkit 还没往这台客户端落过东西）",
+            dir.display()
+        ));
+    }
+    tauri_plugin_opener::open_path(&dir, None::<&str>)
+        .map_err(|err| format!("打不开这个文件夹：{err}"))?;
+    Ok(format!("已在资源管理器里打开：{}", dir.display()))
+}
+
+/// 服务端 mod 有两半，生效条件不一样，所以导入按内容分流：
+///
+/// - 规则脚本（`.lua`）平铺进 `<整合包根>/mods/`：网关每次启动自己扫这一层，不用重编译就生效；
+/// - 整个 mod 目录另存一份到 `<整合包根>/mods/<mod-id>/`：Go 型那一半是编译进网关二进制的，
+///   放对位置只是让它等着被重编译，不重编译不会装载。
+///
+/// 只拷不搬；落点先全部核对再动手，绝不覆盖玩家已有的脚本。
+pub fn import_server_mod(root: &Root, source: &Path) -> Result<String, String> {
+    let scripts_dir = root.mods_dir();
+    let source = source
+        .canonicalize()
+        .map_err(|err| format!("源目录读不动：{err}"))?;
+    if !source.is_dir() {
+        return Err("导入要选的是一个 mod 目录，不是一个文件".to_string());
+    }
+    if let Ok(real) = scripts_dir.canonicalize() {
+        if source.starts_with(&real) {
+            return Err(
+                "这份目录已经在服务端脚本目录里了，不需要导入（要挪位置请自己挪）".to_string(),
+            );
+        }
+    }
+    let name = source
+        .file_name()
+        .map(|v| v.to_string_lossy().into_owned())
+        .ok_or_else(|| "源目录没有名字，取不到 mod id".to_string())?;
+    let id = kebab(&name).to_lowercase();
+    if !valid_mod_id(&id) {
+        return Err(format!(
+            "目录名「{name}」转不成合法 mod id（{id}）：只允许小写字母、数字、点与短横线；先把目录改个名再导入"
+        ));
+    }
+    let target = scripts_dir.join(&id);
+    if target.exists() {
+        return Err(format!(
+            "已经导入过同名的 mod 目录：{}（要换版本请先把它删掉或改源目录名）",
+            target.display()
+        ));
+    }
+    let scripts = rule_scripts(&source);
+    if !scripts.is_empty() {
+        // 这条 mod 若在停用名单里，平铺脚本会绕过名单：网关照读那一层，
+        // 界面上刚按下去的「已停用」当场变成假话。名单读不动时不算（网关自己也读不动它）。
+        let enabled_path = runtime_mods_dir(root).join("enabled.json");
+        if let Ok(file) = read_enabled_file(&enabled_path) {
+            if file.disabled.iter().any(|seen| *seen == id) {
+                return Err(format!(
+                    "「{id}」在服务端停用名单里（{}）：把它的规则脚本平铺到 {} 会让这条照样装载，\
+                     开关就成了假话。请先在「服务端 mod」里把它打开，或先删掉这处落点再导入",
+                    enabled_path.display(),
+                    scripts_dir.display()
+                ));
+            }
+        }
+    }
+    for file in &scripts {
+        let stem = file
+            .file_name()
+            .ok_or_else(|| "脚本文件没有名字".to_string())?;
+        let dst = scripts_dir.join(stem);
+        if dst.exists() {
+            return Err(format!(
+                "{} 这一层已经有同名脚本「{}」，启动器不覆盖：要换版本请先把它删掉再导入",
+                scripts_dir.display(),
+                stem.to_string_lossy()
+            ));
+        }
+    }
+    fs::create_dir_all(&scripts_dir).map_err(|err| format!("建脚本目录失败：{err}"))?;
+    let copied = copy_tree(&source, &target, IMPORT_SIZE_LIMIT)?;
+    let mut placed: Vec<std::path::PathBuf> = Vec::new();
+    for file in &scripts {
+        let Some(stem) = file.file_name() else { continue };
+        let dst = scripts_dir.join(stem);
+        match fs::copy(file, &dst) {
+            Ok(_) => placed.push(dst),
+            Err(err) => {
+                // 半套脚本比没导更糟：同名以先者为准，缺一份就会静默少一条规则。
+                for done in &placed {
+                    let _ = fs::remove_file(done);
+                }
+                let _ = fs::remove_dir_all(&target);
+                return Err(format!("拷 {} 失败：{err}（已撤销本轮导入）", dst.display()));
+            }
+        }
+    }
+    let names: Vec<String> = placed
+        .iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+    if names.is_empty() {
+        return Ok(format!(
+            "已把「{id}」整个目录放到 {}（{copied} 字节）：这一份里没取到 .lua 规则脚本，\
+             它是 Go 型服务端 mod —— 服务端 mod 编译进网关二进制才会装载，启动器只把它放对位置",
+            target.display()
+        ));
+    }
+    Ok(format!(
+        "已导入服务端 mod「{id}」：{count} 份规则脚本（{names}）平铺到 {}，整个目录另放到 \
+         {}（{copied} 字节）。脚本下次「开始游戏」时由服务端自己读；Go 型那一半要重编译网关二进制\
+         才会装载，不重编译不会出现在装载名单里",
+        scripts_dir.display(),
+        target.display(),
+        count = names.len(),
+        names = names.join("、"),
+    ))
+}
+
+/// mod 目录里「该平铺进脚本目录」的那几份 `.lua`：先看 `rules/`（Go 型 mod 把规则放这一层），
+/// 取不到才看 mod 目录第一层。只看这两层、不递归 —— 递归会把附带的样例当成规则发出去。
+fn rule_scripts(source: &Path) -> Vec<std::path::PathBuf> {
+    let in_rules = lua_files(&source.join("rules"));
+    if !in_rules.is_empty() {
+        return in_rules;
+    }
+    lua_files(source)
+}
+
+fn lua_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let is_lua = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("lua"))
+                .unwrap_or(false);
+            if is_lua {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
 }
 
 #[cfg(test)]
@@ -1638,6 +1800,124 @@ mod tests {
             assert!(!pick_description(name, "").is_empty(), "「{name}」的说明是空的");
         }
         assert_eq!(PLUGIN_DESCRIPTIONS.len(), on_disk.len(), "表里多了一条不存在的件");
+    }
+
+    /// 服务端 mod 有两半：规则脚本要平铺进 `<包根>/mods` 才不用重编译，整个目录另存一份等着重编译。
+    #[test]
+    fn import_server_mod_routes_scripts_and_keeps_the_folder() {
+        let (root, dir) = temp_pack("srv-import");
+        let outer = std::env::temp_dir().join(format!("dfo-mods-srvsrc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        let source = outer.join("giveaway.random-equipment");
+        std::fs::create_dir_all(source.join("rules")).expect("rules 子目录");
+        std::fs::write(source.join("mod.go"), b"package giveaway").expect("造 mod.go");
+        std::fs::write(source.join("rules").join("giveaway.lua"), b"-- rule").expect("造规则脚本");
+        std::fs::write(source.join("README.md"), b"readme").expect("造附带文件");
+
+        let message = import_server_mod(&root, &source).expect("导入成功");
+        let scripts = dir.join("mods");
+        assert!(
+            scripts.join("giveaway.lua").is_file(),
+            "规则脚本要平铺进脚本目录：{}",
+            scripts.display()
+        );
+        let laid = scripts.join("giveaway.random-equipment");
+        assert!(
+            laid.join("mod.go").is_file() && laid.join("rules").join("giveaway.lua").is_file(),
+            "整个目录要另存一份：{}",
+            laid.display()
+        );
+        assert!(message.contains("1 份规则脚本"), "要说清平铺了几份：{message}");
+        assert!(message.contains("重编译"), "Go 型那一半要讲清不重编译不装载：{message}");
+
+        let err = import_server_mod(&root, &source).unwrap_err();
+        assert!(err.contains("已经导入过同名"), "{err}");
+        let _ = std::fs::remove_dir_all(outer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// 同名脚本一律不覆盖，而且落点先全部核对：撞名就一个字节都不落。
+    #[test]
+    fn import_server_mod_refuses_to_overwrite_a_same_named_script() {
+        let (root, dir) = temp_pack("srv-clash");
+        let outer = std::env::temp_dir().join(format!("dfo-mods-srvclash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        let source = outer.join("boxed.loot");
+        std::fs::create_dir_all(source.join("rules")).expect("rules 子目录");
+        std::fs::write(source.join("rules").join("a.lua"), b"mine").expect("造脚本 a");
+        std::fs::write(source.join("rules").join("b.lua"), b"ours").expect("造脚本 b");
+        std::fs::create_dir_all(dir.join("mods")).expect("脚本目录");
+        let keep = dir.join("mods").join("b.lua");
+        std::fs::write(&keep, b"player-s own").expect("造同名脚本");
+
+        let err = import_server_mod(&root, &source).unwrap_err();
+        assert!(err.contains("已经有同名脚本"), "{err}");
+        assert!(
+            !dir.join("mods").join("a.lua").exists(),
+            "撞名时不能先把另一份落下"
+        );
+        assert!(
+            !dir.join("mods").join("boxed.loot").exists(),
+            "撞名时整个目录也不落"
+        );
+        assert_eq!(std::fs::read(&keep).expect("读回同名脚本"), b"player-s own");
+        let _ = std::fs::remove_dir_all(outer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// 名单里停着的那一条不能靠平铺脚本绕回去：那样界面上的「已停用」就成了假话。
+    #[test]
+    fn import_server_mod_refuses_to_route_scripts_of_a_disabled_mod() {
+        let (root, dir) = temp_pack("srv-disabled");
+        let outer = std::env::temp_dir().join(format!("dfo-mods-srvoff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        let source = outer.join("giveaway.random-equipment");
+        std::fs::create_dir_all(source.join("rules")).expect("rules 子目录");
+        std::fs::write(source.join("rules").join("giveaway.lua"), b"-- rule").expect("造规则脚本");
+        std::fs::create_dir_all(dir.join("server").join("mods")).expect("名单目录");
+        std::fs::write(
+            dir.join("server").join("mods").join("enabled.json"),
+            r#"{"disabled":["giveaway.random-equipment"]}"#,
+        )
+        .expect("造停用名单");
+
+        let err = import_server_mod(&root, &source).unwrap_err();
+        assert!(err.contains("在服务端停用名单里"), "{err}");
+        assert!(
+            !dir.join("mods").join("giveaway.lua").exists(),
+            "拒绝时一个字节都不落"
+        );
+        assert!(
+            !dir.join("mods").join("giveaway.random-equipment").exists(),
+            "拒绝时整个目录也不落"
+        );
+        let _ = std::fs::remove_dir_all(outer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// 只带 Go 件、一份 .lua 都没有的那一种：位置照样放对，但界面必须说清它现在不生效。
+    #[test]
+    fn import_server_mod_names_a_go_only_mod_as_inert() {
+        let (root, dir) = temp_pack("srv-go-only");
+        let outer = std::env::temp_dir().join(format!("dfo-mods-srvonly-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        let source = outer.join("plain.hook");
+        std::fs::create_dir_all(source.join("rules")).expect("rules 子目录");
+        std::fs::write(source.join("mod.go"), b"package hook").expect("造 mod.go");
+
+        let message = import_server_mod(&root, &source).expect("导入成功");
+        assert!(
+            dir.join("mods")
+                .join("plain.hook")
+                .join("mod.go")
+                .is_file(),
+            "整个目录要落进脚本目录的子目录"
+        );
+        assert!(!dir.join("mods").join("mod.go").exists(), "Go 件不该被平铺");
+        assert!(message.contains("没取到 .lua 规则脚本"), "{message}");
+        assert!(message.contains("放对位置"), "要说明这只是放对位置：{message}");
+        let _ = std::fs::remove_dir_all(outer);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 

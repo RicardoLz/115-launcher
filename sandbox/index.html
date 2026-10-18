@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>沙盒 · DFO-115US 启动器</title>
+    <style>
+      /* 真窗口最小 960x540：沙盒的浏览器窗口再窄也按这块地板量，
+         否则测出来的是现实中不存在的尺寸（顶栏会被挤成一堆折行）。 */
+      html {
+        height: 100%;
+        overflow: auto;
+      }
+
+      html,
+      body,
+      #root {
+        min-width: 960px;
+        min-height: 540px;
+        height: 100%;
+        margin: 0;
+      }
+
+      /* 深色底只留在 html 上：React 挂上前那一闪别是白的。
+         body 与 #root 不能带死色——styles.css 里 body 才按主题上色，
+         #root 压一层深底会把亮色主题的窗口底染成灰黑，没设壁纸时截图整个错。 */
+      html {
+        background: #0b0d10;
+      }
+
+      body,
+      #root {
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="sandbox-panel-host"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

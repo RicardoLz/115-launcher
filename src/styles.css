@@ -2,20 +2,32 @@
    所有颜色一律走变量，明暗只差 :root[data-theme] 那一块。 */
 
 :root {
-  --bg: #0e1116;
-  --bg-2: #131821;
-  --panel: #171d28;
-  --panel-2: #1c2431;
-  --line: #27303f;
-  --line-soft: #202836;
-  --text: #dfe6f0;
-  --text-dim: #93a0b4;
-  --text-faint: #63708a;
+  /* 配色方案只管色相与饱和，亮度归明暗主题管：6 套方案 × 2 个主题不用各写一份。
+     data-scheme 缺省就是琥珀（原来的样子），设置页选其余方案时由 theme.ts 写这个属性。 */
+  --hue: 76;
+  --chroma: 0.14;
+  /* 主色当文字/描边时的亮度：暗色要亮，亮色要压深才看得清。 */
+  --ink-l: 79%;
 
-  /* 填充用主色，文字/描边用 -ink 变体：琥珀在小字号上压白底看不清。 */
-  --accent: #f0a93b;
-  --accent-deep: #c97f16;
-  --accent-ink: #f0a93b;
+  /* 暗色窗口面也用方案色压一味，比例只有 3~4%：换方案能看出底调跟着走，
+     又不至于把原来那套石墨底改成另一种颜色。壁纸主色在暗色只动按钮那圈边框，不动这里。 */
+  --bg: color-mix(in oklab, var(--accent) 3%, #0e1116);
+  --bg-2: color-mix(in oklab, var(--accent) 3%, #131821);
+  --panel: color-mix(in oklab, var(--accent) 4%, #171d28);
+  --panel-2: color-mix(in oklab, var(--accent) 4%, #1c2431);
+  --line: color-mix(in oklab, var(--accent) 5%, #27303f);
+  --line-soft: color-mix(in oklab, var(--accent) 4%, #202836);
+  /* 三档正文全部往「更亮」这一头抬一档：玻璃开着时卡片只剩 17% 的纱，底下就是壁纸本身，
+     原来那套按不透明面板定的灰度压在花背景上第一行就糊。 --text-faint 是 .hint 那一档，
+     字最小、最需要抬。 */
+  --text: #f1f5fb;
+  --text-dim: #b3c0d4;
+  --text-faint: #8593ab;
+
+  /* 填充用主色，文字/描边用 -ink 变体：高饱和主色压在小字号上看不清。 */
+  --accent: oklch(79% var(--chroma) var(--hue));
+  --accent-deep: oklch(63% var(--chroma) var(--hue));
+  --accent-ink: oklch(var(--ink-l) var(--chroma) var(--hue));
   --ok: #4fd39a;
   --ok-ink: #4fd39a;
   --warn: #f0c674;
@@ -23,16 +35,23 @@
   --err: #ff6b73;
   --err-ink: #ff6b73;
 
-  --glow: #1b2434;
-  --sunken: #0b0e13;
-  --field-bg: #0f1420;
-  --hover: #222b3a;
-  --hover-line: #3b4657;
+  --glow: color-mix(in oklab, var(--accent) 8%, #1b2434);
+  --sunken: color-mix(in oklab, var(--accent) 3%, #0b0e13);
+  --field-bg: color-mix(in oklab, var(--accent) 3%, #0f1420);
+  --hover: color-mix(in oklab, var(--accent) 5%, #222b3a);
+  --hover-line: color-mix(in oklab, var(--accent) 8%, #3b4657);
   --chrome: rgba(19, 24, 33, 0.72);
   --chrome-2: rgba(15, 19, 26, 0.85);
   --scrim: rgba(6, 8, 12, 0.68);
-  --rail: #10151d;
-  --rail-active: rgba(240, 169, 59, 0.13);
+  /* 背景层压在文字下，靠这两层保证可读；纯色主题用不上。 */
+  --bg-veil: linear-gradient(180deg, rgba(6, 9, 14, 0.2) 0%, rgba(6, 9, 14, 0.36) 100%);
+  --card-veil: rgba(23, 29, 40, 0.74);
+  /* 字底那一圈：1px 紧贴描影把笔画从壁纸里抠出来，5px 那一团负责把字周围一圈压暗——
+     纱只有 17%，壁纸亮度直接决定字底背景，光抬字色在亮壁纸那一块只能到 4.3:1；
+     中间这层加上后同一条文案量到 5:1 以上。16px 那团只压个底，不指望它。 */
+  --text-halo: 0 1px 2px rgba(4, 6, 10, 0.95), 0 0 5px rgba(4, 6, 10, 0.78), 0 0 16px rgba(4, 6, 10, 0.5);
+  --rail: color-mix(in oklab, var(--accent) 3%, #10151d);
+  --rail-active: color-mix(in oklab, var(--accent) 13%, transparent);
   --tip-bg: #232d3d;
   --log-info: #b9c6d8;
   --evidence: #c3cfdf;
@@ -40,27 +59,88 @@
   --power-text: #17120a;
   --shadow: rgba(0, 0, 0, 0.9);
 
+  /* ---- 药丸那一族（右下角起停开关 + 账号胶囊） ----
+     原来这些值硬编码在 .launch-dock 里，只有暗色一套，所以亮色模式下永远是一块黑底白字。
+     现在全部上收到这里，亮色只改下面那块；红色（进行中）档是从 --err 推的，两个主题共用公式。 */
+  --pill-plate: hsl(0 0% 12%);
+  --pill-text: hsl(0 0% 100% / 0.74);
+  --pill-text-hot: hsl(0 0% 100%);
+  --pill-text-tail: hsl(0 0% 100% / 0.7);
+  --pill-hair: hsl(0 0% 100% / 0.55);
+  --pill-shade: hsl(0 0% 0%);
+  /* 静止时的那道投影；悬停时由控件自己改写成一个零宽 layer（底板要「贴」在光晕上）。 */
+  --pill-drop: 0 4px 10px -4px hsl(0 0% 0% / 0.85);
+  --pill-glow: color-mix(in oklab, var(--wall-accent, var(--accent)) 75%, transparent);
+  --pill-wash: color-mix(in oklab, var(--accent) 74%, transparent);
+  --pill-shine: color-mix(in oklab, var(--accent) 60%, white);
+  --pill-shine-2: color-mix(in oklab, var(--accent) 80%, black);
+  --pill-sweep: #fff;
+  --pill-plate-hot: color-mix(in oklab, var(--err) 20%, var(--pill-plate));
+  --pill-glow-hot: color-mix(in oklab, var(--err) 72%, transparent);
+  --pill-wash-hot: color-mix(in oklab, var(--err) 78%, transparent);
+  --pill-shine-hot: color-mix(in oklab, var(--err) 55%, white);
+  --pill-shine-hot-2: color-mix(in oklab, var(--err) 75%, black);
+  --pill-hair-hot: color-mix(in oklab, var(--pill-hair) 72%, transparent);
+  --pill-dim-plate: color-mix(in oklab, var(--pill-plate) 55%, transparent);
+  --pill-dim-hair: color-mix(in oklab, var(--pill-hair) 55%, transparent);
+  --pill-dim-text: color-mix(in oklab, var(--pill-text-hot) 40%, transparent);
+
+  /* 进度环：起停那一档转红，部署那一档转绿，其余跟方案色。 */
+  --frame-march: color-mix(in oklab, var(--accent) 80%, white);
+  --frame-march-launch: color-mix(in oklab, var(--err) 80%, white);
+  --frame-bar: var(--accent);
+  --frame-bar-deploy: var(--ok);
+
+  /* ---- 按钮共用配方：页面上所有可点的小方块都吃这五个值 ---- */
+  --btn-bg: var(--panel-2);
+  --btn-line: var(--line);
+  --btn-hover-bg: var(--hover);
+  --btn-hover-line: var(--hover-line);
+  /* 一律药丸：方按钮、图标按钮、分段控件、下拉、账号条目、看板卡片同一个圆角，
+     25px 高的图标按钮因此是正圆。窗口控制键与下划线式页签不吃这条（它们不是「块」）。 */
+  --btn-radius: 999px;
+  /* 下拉面板里的选项行不是按钮，是列表行——药丸会把它们切出奇怪的弧，这档保持 8px。 */
+  --btn-radius-sm: 8px;
+  --btn-hair: inset 0 1px 0 color-mix(in oklab, var(--text) 7%, transparent);
+  --focus-ring: color-mix(in oklab, var(--accent) 60%, transparent);
+
+  /* ---- 滚动条与下拉面板 ---- */
+  --sb-track: transparent;
+  --sb-thumb: color-mix(in oklab, var(--text-faint) 55%, transparent);
+  --sb-thumb-hot: color-mix(in oklab, var(--accent) 70%, transparent);
+  --picker-bg: var(--panel);
+
   --mono: "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
   --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
 
   /* 内置 ease-out 衰减太弱，UI 入场一律用这条。 */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+  /* 位移专用：收尾时冲过目标一点点再落回，用来读「这东西是被扔过去的」。
+     只给会改变位置的件用（开关滑块、侧栏高亮胶囊），入场淡入仍旧走 --ease-out。 */
+  --ease-snap: cubic-bezier(0.34, 1.36, 0.64, 1);
+
+  /* 侧栏胶囊比开关再软一档：只留一点点冲过头，够读出「有重量」但不会弹眼。 */
+  --ease-rail: cubic-bezier(0.32, 1.08, 0.55, 1);
 }
 
 :root[data-theme="light"] {
-  --bg: #eef1f6;
-  --bg-2: #f8fafd;
+  /* 亮色主题下整扇窗口跟着壁纸主题色走：每个 token 的兜底值改成方案主色，
+     所以没壁纸时窗口也随选的那套配色偏色，混色比例沿用原来的浅。 */
+  --bg: color-mix(in oklab, var(--wall-accent, var(--accent)) 10%, #eef1f6);
+  --bg-2: color-mix(in oklab, var(--wall-accent, var(--accent)) 6%, #f8fafd);
   --panel: #ffffff;
-  --panel-2: #eef2f8;
-  --line: #d6dde9;
-  --line-soft: #e5eaf2;
-  --text: #1b2230;
-  --text-dim: #52607a;
-  --text-faint: #8592a8;
+  --panel-2: color-mix(in oklab, var(--wall-accent, var(--accent)) 7%, #eef2f8);
+  --line: color-mix(in oklab, var(--wall-accent, var(--accent)) 18%, #d6dde9);
+  --line-soft: color-mix(in oklab, var(--wall-accent, var(--accent)) 12%, #e5eaf2);
+  /* 亮色同一条道理，方向相反：三档一起压深，正文几乎落到纯黑墨，
+     .hint 那档原来 #8592a8 压在浅背景上只有 3:1 出头，抬到能读的档位。 */
+  --text: #0e1420;
+  --text-dim: #3f4c64;
+  --text-faint: #64718a;
 
-  --accent: #f0a93b;
-  --accent-deep: #c97f16;
-  --accent-ink: #9a5b05;
+  /* 主色本身两个主题同一套算法，这里只把「当文字用」那一档压深。 */
+  --ink-l: 42%;
   --ok: #4fd39a;
   --ok-ink: #0f7a4f;
   --warn: #f0c674;
@@ -68,22 +148,79 @@
   --err: #ff6b73;
   --err-ink: #c0333c;
 
-  --glow: #dfe6f2;
+  --glow: color-mix(in oklab, var(--wall-accent, var(--accent)) 20%, #dfe6f2);
   --sunken: #f7f9fc;
-  --field-bg: #f6f8fc;
-  --hover: #e6ecf6;
-  --hover-line: #c3cddf;
-  --chrome: rgba(255, 255, 255, 0.78);
-  --chrome-2: rgba(248, 250, 253, 0.9);
+  --field-bg: color-mix(in oklab, var(--wall-accent, var(--accent)) 8%, #f6f8fc);
+  --hover: color-mix(in oklab, var(--wall-accent, var(--accent)) 16%, #e6ecf6);
+  --hover-line: color-mix(in oklab, var(--wall-accent, var(--accent-deep)) 30%, #c3cddf);
+  --chrome: color-mix(in oklab, var(--wall-accent, var(--accent)) 8%, rgba(255, 255, 255, 0.78));
+  --chrome-2: color-mix(in oklab, var(--wall-accent, var(--accent)) 6%, rgba(248, 250, 253, 0.9));
   --scrim: rgba(120, 132, 152, 0.42);
-  --rail: #f4f6fb;
-  --rail-active: rgba(201, 127, 22, 0.14);
+  --bg-veil: none;
+  --card-veil: rgba(255, 255, 255, 0.78);
+  --text-halo: 0 1px 2px rgba(255, 255, 255, 0.98), 0 0 5px rgba(255, 255, 255, 0.92), 0 0 16px rgba(255, 255, 255, 0.7);
+  --rail: color-mix(in oklab, var(--wall-accent, var(--accent)) 10%, #f4f6fb);
+  --rail-active: color-mix(in oklab, var(--accent-deep) 14%, transparent);
   --tip-bg: #2b3444;
   --log-info: #44536d;
   --evidence: #3d4a60;
   --stop-text: #7d1620;
   --power-text: #2b1d03;
   --shadow: rgba(28, 38, 56, 0.28);
+
+  /* 药丸那族整块换亮色配方：白底深字、光晕走方案色，投影改浅灰。
+     红色档、够不着那档都是从这几个值推的，这里不用重复写。 */
+  --pill-plate: color-mix(in oklab, var(--wall-accent, var(--accent)) 7%, #ffffff);
+  --pill-text: var(--text-dim);
+  --pill-text-hot: var(--text);
+  --pill-text-tail: var(--text-dim);
+  --pill-hair: hsl(0 0% 100% / 0.9);
+  --pill-shade: color-mix(in oklab, var(--accent-deep) 26%, hsl(220 18% 80%));
+  --pill-drop: 0 4px 10px -5px hsl(220 30% 40% / 0.34);
+  --pill-glow: color-mix(in oklab, var(--wall-accent, var(--accent-deep)) 55%, transparent);
+  /* 悬停那层是白药丸上唯一的上色：20% 太薄，鼠标一放只看见白底微微发黄，跟静止态分不出来。
+     这三档一起抬（wash 是整片底色，两团 shine 是压在上面的高光斑），亮色下悬停才有「点亮」这一下。
+     字是 --text 深墨，铺在 44% 主色上对比还够。 */
+  --pill-wash: color-mix(in oklab, var(--wall-accent, var(--accent)) 44%, transparent);
+  --pill-shine: color-mix(in oklab, var(--accent) 72%, white);
+  --pill-shine-2: color-mix(in oklab, var(--accent-deep) 62%, white);
+  --pill-sweep: color-mix(in oklab, var(--accent-deep) 60%, transparent);
+
+  --sb-thumb: color-mix(in oklab, var(--text-faint) 40%, transparent);
+}
+
+/* 配色方案：只动色相与饱和，其余全在上面两块里按公式推出来。
+   选择器不限定 :root，设置页里那排色卡也带同一个属性，于是每块色卡能预览自己那套方案。
+   琥珀也单独写一条：它是 :root 的缺省值，不写的话——选中别的方案时，这块色卡会继承根节点
+   的 --hue/--chroma，预览出来的就是别的方案的颜色。 */
+[data-scheme="amber"] {
+  --hue: 76;
+  --chroma: 0.14;
+}
+
+[data-scheme="violet"] {
+  --hue: 288;
+  --chroma: 0.17;
+}
+
+[data-scheme="azure"] {
+  --hue: 250;
+  --chroma: 0.15;
+}
+
+[data-scheme="teal"] {
+  --hue: 190;
+  --chroma: 0.12;
+}
+
+[data-scheme="moss"] {
+  --hue: 145;
+  --chroma: 0.13;
+}
+
+[data-scheme="rose"] {
+  --hue: 350;
+  --chroma: 0.16;
 }
 
 * {
@@ -110,6 +247,7 @@ body {
 }
 
 .app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -117,12 +255,17 @@ body {
 
 /* 左栏 + 右侧整块 */
 .shell {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex: 1;
   min-height: 0;
 }
 
 .pane {
+  /* 主页那两枚悬浮件（更新日志卡、右下角起停开关）的定位锚：内容区自己的边，
+     不含左侧那条 68 栏。撤了这行它们会退回 .shell 去量整扇窗口的左边。 */
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -164,7 +307,7 @@ body {
   appearance: none;
   cursor: pointer;
   border: 0;
-  border-radius: 13px;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-faint);
   transition: background 0.15s ease, color 0.15s ease;
@@ -175,8 +318,9 @@ body {
   color: var(--text);
 }
 
+/* 当前项只换墨色：底色那块「高亮」交给会滑动的 .rail-marker（见动效补一轮那一块），
+   否则旧的还留着底色、新的又浮起一枚，等于两层各自淡入淡出，切换看着是「闪」不是「移」。 */
 .rail-item[aria-current="page"] {
-  background: var(--rail-active);
   color: var(--accent-ink);
 }
 
@@ -211,7 +355,7 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   padding: 12px 12px 12px 20px;
   border-bottom: 1px solid var(--line);
   background: var(--chrome);
@@ -221,17 +365,26 @@ body {
   display: flex;
   align-items: baseline;
   gap: 9px;
+  min-width: 0;
 }
 
 .brand b {
   font-size: 16px;
   letter-spacing: 0.4px;
+  flex: none;
+  white-space: nowrap;
 }
 
+/* 窗口收到最小 960 时顶栏刚好排满，按钮与窗口控件都不肯让，压力全落在这行标题上。
+   让版本号先省略号截断，也不能把「DFO-115US 启动器」折成两行顶开顶栏高度。 */
 .brand span {
   color: var(--text-faint);
   font-size: 12px;
   font-family: var(--mono);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chip {
@@ -347,6 +500,14 @@ body {
   padding: 16px 20px 18px;
 }
 
+/* 拖拽翻动进行中（glide.ts 置的 data-glide）：整片改「抓着」的手势并临时禁掉选字，
+   否则指针扫过按钮会换回 pointer，一拖还顺带选出满屏蓝块。 */
+.page[data-glide="drag"],
+.page[data-glide="drag"] * {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .body {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(340px, 0.95fr);
@@ -408,132 +569,513 @@ body {
   line-height: 1.7;
 }
 
-/* 主操作区 */
+/* ------------------------------------------------------------- 主页背景层 */
 
-.hero {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.bg-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.24s ease;
 }
 
-.power {
+/* 素材第一帧真的出来了才显形（见 BackgroundLayer 的 painted），免得把开机那几帧错位的画面亮出来。 */
+.bg-layer[data-painted="yes"] {
+  opacity: 1;
+}
+
+.bg-layer img,
+.bg-layer video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 亮色主题一层纱都不铺（壁纸原样），暗色只把亮度压下一点，靠 --bg-veil 的取值区分。 */
+.bg-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-veil);
+}
+
+/* 有背景时卡片改半透明，否则整张壁纸被不透气的面板挡得只剩边。 */
+.app[data-bg="on"] .card,
+.app[data-bg="on"] .blank {
+  background: var(--card-veil);
+  backdrop-filter: blur(10px) saturate(120%);
+}
+
+/* ------------------------------------------------- 主页右下角那枚起停开关 */
+
+.home-stage {
+  min-height: 100%;
+}
+
+.launch-dock {
+  position: absolute;
+  right: 22px;
+  bottom: 48px;
+  z-index: 20;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
 }
 
-.power-btn {
+/* 账号收成一条同款胶囊；点开向上弹，弹层里点一个名字就直接换，没有确认按钮。 */
+.account-dock {
+  position: relative;
+}
+
+.account-pill {
+  --active: 0;
+  position: relative;
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 218px;
+  padding: 8px 15px;
   border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pill-text);
+  font-family: var(--mono);
+  font-size: 12px;
   cursor: pointer;
-  min-width: 232px;
-  padding: 20px 26px;
-  border-radius: 16px;
-  font-family: var(--sans);
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: var(--power-text);
-  background: linear-gradient(180deg, #ffc15e 0%, var(--accent) 55%, var(--accent-deep) 100%);
-  box-shadow: 0 10px 26px -12px rgba(240, 169, 59, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.4);
-  transition: filter 0.15s ease, transform 0.06s ease;
+  transform: scale(calc(1 + (var(--active) * 0.05)));
+  transition:
+    transform 0.3s ease-in-out,
+    color 0.2s ease-in-out;
 }
 
-.power-btn:hover:not(:disabled) {
-  filter: brightness(1.07);
+.account-pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background-color: var(--pill-plate);
+  box-shadow:
+    inset 0 0.5px var(--pill-hair),
+    inset 0 -1px 2px 0 var(--pill-shade),
+    var(--pill-drop),
+    0 0 0 calc(var(--active) * 2px) var(--pill-glow);
+  transition: all 0.3s ease-in-out;
 }
 
-.power-btn:active:not(:disabled) {
-  transform: translateY(1px);
+.account-pill > svg,
+.account-pill__name {
+  position: relative;
+  z-index: 1;
 }
 
-.power-btn:disabled {
-  cursor: not-allowed;
-  color: var(--text-faint);
-  background: var(--panel-2);
-  box-shadow: none;
-  border: 1px solid var(--line);
+.account-pill > svg {
+  flex: none;
 }
 
-.power-btn[data-kind="stop"] {
-  color: var(--stop-text);
-  background: linear-gradient(180deg, #4a2126 0%, #33161a 100%);
-  border: 1px solid var(--err);
-  box-shadow: none;
+.account-pill:is(:hover, :focus-visible),
+.account-pill[data-open="on"] {
+  --active: 1;
+  /* 抬起的那一刻投影收掉：底板改成贴在光晕上，而不是悬在空中。 */
+  --pill-drop: 0 0 0 0 transparent;
+  color: var(--pill-text-hot);
 }
 
-.power-btn[data-kind="stop"]:disabled {
-  color: var(--text-faint);
-  background: var(--panel-2);
-  border-color: var(--line);
+.account-pill:active {
+  transform: scale(1);
 }
 
-.power-side {
+.account-pill__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 0;
+  width: 262px;
+  padding: 12px 13px 13px;
+  border: 1px solid var(--hover-line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 20px 44px var(--shadow);
+  animation: account-pop-in 0.16s var(--ease-out);
 }
 
-.power-state {
-  font-size: 15px;
-  font-weight: 600;
+.account-pop > label {
+  font-size: 11.5px;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
 }
 
-.power-detail {
-  color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1.55;
-  word-break: break-word;
-  user-select: text;
+.account-pop__title {
+  margin-top: 2px;
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  color: var(--text-faint);
 }
 
-/* 就绪清单 */
-
-.checklist {
+.account-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  padding-top: 4px;
-  border-top: 1px dashed var(--line-soft);
+  flex-direction: column;
+  gap: 3px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
 }
 
-.check {
+.account-item {
+  appearance: none;
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
   color: var(--text-dim);
-}
-
-.check b {
-  flex: none;
-  white-space: nowrap;
-  font-weight: 500;
-}
-
-.check em {
-  font-style: normal;
-  color: var(--text-faint);
   font-family: var(--mono);
   font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color 0.14s var(--ease-out),
+    background 0.14s var(--ease-out),
+    border-color 0.14s var(--ease-out);
 }
 
-.check[data-level="ok"]::before {
-  content: "✓";
-  color: var(--ok-ink);
+.account-item:hover {
+  color: var(--text);
+  border-color: var(--line);
+  background: var(--hover);
 }
 
-.check[data-level="warn"]::before {
-  content: "!";
-  color: var(--warn-ink);
+.account-item[data-current="on"] {
+  color: var(--accent-ink);
+}
+
+.account-item__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-item__tag {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: var(--text-faint);
+}
+
+@keyframes account-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 主样式取自 uiverse 那条「mean-bird」：黑色药丸 + 悬停一圈紫光 + 绕边高光 + 渐变裁切文案。
+   进行中那圈跑动虚线与按真实字节填充的描边取自「quiet-panda」。老的轨道与圆珠整块撤掉。 */
+.launch-toggle {
+  --active: 0;
+  position: relative;
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 200px;
+  height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pill-text-hot);
+  cursor: pointer;
+  transform: scale(calc(1 + (var(--active) * 0.06)));
+  transition: transform 0.3s ease-in-out;
+}
+
+.launch-toggle:is(:hover, :focus-visible):not(:disabled) {
+  --active: 1;
+  --pill-drop: 0 0 0 0 transparent;
+}
+
+.launch-toggle:active:not(:disabled) {
+  transform: scale(1);
+}
+
+.launch-toggle:disabled {
+  cursor: default;
+}
+
+/* 底板：顶上一道内高光、底下一道内阴影，悬停时外面再套一圈光晕。 */
+.launch-toggle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background-color: var(--pill-plate);
+  box-shadow:
+    inset 0 0.5px var(--pill-hair),
+    inset 0 -1px 2px 0 var(--pill-shade),
+    var(--pill-drop),
+    0 0 0 calc(var(--active) * 2px) var(--pill-glow);
+  transition: all 0.3s ease-in-out;
+  z-index: 1;
+}
+
+/* 悬停浮起的那层主色渐变，压在底板之上、字与图标之下。 */
+.launch-toggle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background-color: var(--pill-wash);
+  background-image:
+    radial-gradient(at 51% 89%, var(--pill-shine) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, var(--pill-shine-2) 0px, transparent 50%),
+    radial-gradient(at 22% 91%, var(--pill-shine-2) 0px, transparent 50%);
+  background-position: top;
+  opacity: var(--active);
+  transition: opacity 0.3s ease-in-out;
+  z-index: 2;
+}
+
+/* 绕着边转的白光：比底板大一圈，只露出边缘那一缕。
+   默认不亮，只有「开始游戏」「停止游戏」这两档才转（下面那条）：进行中的两档已经有跑动虚线
+   在说话，再叠一缕高光就是两个状态指示抢同一个位置。够不着（data-dim）也不转。 */
+.toggle__sweep {
+  position: absolute;
+  inset: -1px;
+  overflow: hidden;
+  border-radius: 999px;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.25s var(--ease-out);
+}
+
+.launch-toggle[data-mode="launch"]:not([data-dim="on"]):is([data-state="idle"], [data-state="running"]) .toggle__sweep {
+  opacity: 1;
+}
+
+.toggle__sweep::before {
+  content: "";
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  width: 100%;
+  height: 2rem;
+  background-color: var(--pill-sweep);
+  transform-origin: left;
+  animation: toggle-orbit 2s linear infinite;
+  mask: linear-gradient(transparent 0%, white 120%);
+}
+
+@keyframes toggle-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toggle__icon,
+.toggle__label {
+  position: relative;
+  z-index: 3;
+}
+
+.toggle__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+}
+
+.toggle__icon svg {
+  grid-area: 1 / 1;
+  overflow: visible;
+}
+
+.glyph {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 0.2s var(--ease-out);
+}
+
+.glyph--play,
+.glyph--stop {
+  fill: currentColor;
+}
+
+.glyph--update {
+  fill: none;
+  stroke: currentColor;
+}
+
+.launch-toggle[data-mode="launch"][data-state="idle"] .glyph--play,
+.launch-toggle[data-mode="launch"][data-state="starting"] .glyph--play,
+.launch-toggle[data-mode="launch"][data-state="running"] .glyph--stop,
+.launch-toggle[data-mode="launch"][data-state="stopping"] .glyph--stop,
+.launch-toggle[data-mode="update"] .glyph--update {
+  opacity: 1;
+}
+
+/* 悬停时图标一格格跳，跟那条参考一样。 */
+.launch-toggle:is(:hover, :focus-visible):not(:disabled) .glyph {
+  animation: glyph-pulse 1.5s linear 0.3s infinite;
+}
+
+@keyframes glyph-pulse {
+  0%,
+  34%,
+  71%,
+  100% {
+    transform: scale(1);
+  }
+  17% {
+    transform: scale(1.2);
+  }
+  49% {
+    transform: scale(1.08);
+  }
+  83% {
+    transform: scale(1.16);
+  }
+}
+
+/* 文案是白→半透的渐变裁切。尾巴留 0.7 起步，是为了挂到壁纸上还看得清。 */
+.toggle__label {
+  font-size: 13.5px;
   font-weight: 700;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+  /* 渐变字必须把描影摘掉：color: transparent + background-clip: text 时，text-shadow 画在
+     字形背后且不受 clip 裁剪，等于把一整团暗色糊在渐变字底下（实测亮像素 8.06% → 0.98%，
+     看上去像换了字体）。这一族是全屏唯一用渐变填的字，其余各档正文都是实色，描影照旧生效。 */
+  text-shadow: none;
+  background-image: linear-gradient(90deg, var(--pill-text-hot) 0%, var(--pill-text-tail) 120%);
+  background-clip: text;
+  color: transparent;
+  pointer-events: none;
+  transition: background-image 0.3s ease-in-out;
 }
 
-.check[data-level="error"]::before {
-  content: "✕";
-  color: var(--err-ink);
+/* 悬停时尾巴那端补满亮度（原来靠 calc 调 alpha，改成整条换成实色，配色方案才能一起跟色）。 */
+.launch-toggle:is(:hover, :focus-visible):not(:disabled) .toggle__label {
+  background-image: linear-gradient(90deg, var(--pill-text-hot) 0%, var(--pill-text-hot) 120%);
 }
+
+/* 起停那一档转红，更新那一档留主色。 */
+.launch-toggle[data-mode="launch"][data-state="running"]::before,
+.launch-toggle[data-mode="launch"][data-state="stopping"]::before {
+  background-color: var(--pill-plate-hot);
+  box-shadow:
+    inset 0 0.5px var(--pill-hair-hot),
+    inset 0 -1px 2px 0 var(--pill-shade),
+    var(--pill-drop),
+    0 0 0 calc(var(--active) * 2px) var(--pill-glow-hot);
+}
+
+.launch-toggle[data-mode="launch"][data-state="running"]::after,
+.launch-toggle[data-mode="launch"][data-state="stopping"]::after {
+  background-color: var(--pill-wash-hot);
+  background-image:
+    radial-gradient(at 51% 89%, var(--pill-shine-hot) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, var(--pill-shine-hot-2) 0px, transparent 50%),
+    radial-gradient(at 22% 91%, var(--pill-shine-hot-2) 0px, transparent 50%);
+}
+
+/* 够不着的那一档只压暗控件本身；进行中不套这一档，它得看着像在动。
+   （那缕绕边白光已经在定义处按档位关掉，这里不用再管它。） */
+.launch-toggle[data-dim="on"]::before {
+  background-color: var(--pill-dim-plate);
+  box-shadow: inset 0 0.5px var(--pill-dim-hair);
+}
+
+.launch-toggle[data-dim="on"] .toggle__label {
+  background-image: none;
+  color: var(--pill-dim-text);
+}
+
+/* 进度环：只在「环境在起 / 在收 / 正在更新」这三档现身。 */
+.toggle__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s var(--ease-out);
+  z-index: 4;
+}
+
+.launch-toggle[data-state="starting"] .toggle__frame,
+.launch-toggle[data-state="stopping"] .toggle__frame,
+.launch-toggle[data-phase="download"] .toggle__frame,
+.launch-toggle[data-phase="deploy"] .toggle__frame {
+  opacity: 1;
+}
+
+/* 跑动的虚线本身就是「还在动」的表示。 */
+.frame__march {
+  fill: none;
+  stroke: var(--frame-march);
+  stroke-width: 2px;
+  stroke-dasharray: 25;
+  animation: frame-march 4s linear infinite;
+}
+
+.launch-toggle[data-mode="launch"] .frame__march {
+  stroke: var(--frame-march-launch);
+}
+
+@keyframes frame-march {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* 真实进度：rect 的 pathLength 归一到 100，所以 --p 就是百分比本身。
+   线帽必须是默认的 butt：round 会把「长度为 0 的那一段」画成一个直径等于线宽的圆点，
+   而 0% 正是启动中/收尾中这一档的常态（--p 只有更新时才有值），于是药丸左上角凭空多一颗红点。 */
+.frame__bar {
+  fill: none;
+  stroke: var(--frame-bar);
+  stroke-width: 2.5px;
+  stroke-dasharray: calc(var(--p, 0) * 1px) 100px;
+  transition: stroke-dasharray 0.35s linear;
+}
+
+.launch-toggle[data-phase="deploy"] .frame__bar {
+  stroke: var(--frame-bar-deploy);
+}
+
+
 
 /* --------------------------------------------------------------- 面板与停靠层 */
 
@@ -613,6 +1155,17 @@ body {
 
 .mode-body .segmented {
   flex-wrap: wrap;
+}
+
+/* 客户端插件面板：清单长，面板自己滚，标题栏不参与滚动。 */
+.mods-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
 }
 
 .dock {
@@ -824,9 +1377,9 @@ body {
 input[type="text"] {
   flex: 1;
   min-width: 0;
-  padding: 9px 11px;
+  padding: 9px 13px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 999px;
   background: var(--field-bg);
   color: var(--text);
   font-family: var(--mono);
@@ -839,27 +1392,67 @@ input[type="text"]:focus {
   border-color: var(--accent-deep);
 }
 
-.btn {
+/* ------------------------------------------------------------- 按钮统一配方
+   分两层。第一层是「有底色的方按钮」共用同一份几何：同一条边框、同一种圆角、同一块底。
+   第二层是「所有可点的东西」共用的交互：同一条过渡、同一圈键盘聚焦环、同一下按反馈，
+   包括图标按钮、筛选药丸、看板卡片——它们各自的形状保留，只把反馈对齐。
+   窗口控制按钮（.win-btn）例外：那边明确不留焦点框。 */
+:is(.btn, .tool-btn, .segmented button, .account-item, .scheme) {
   appearance: none;
   cursor: pointer;
-  padding: 8px 13px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--panel-2);
-  color: var(--text);
   font-family: var(--sans);
-  font-size: 12.5px;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  border: 1px solid var(--btn-line);
+  border-radius: var(--btn-radius);
+  background: var(--btn-bg);
+  box-shadow: var(--btn-hair);
 }
 
-.btn:hover:not(:disabled) {
-  border-color: var(--hover-line);
-  background: var(--hover);
+:is(.btn, .tool-btn, .segmented button, .account-item, .scheme):hover:not(:disabled) {
+  border-color: var(--btn-hover-line);
+  background: var(--btn-hover-bg);
 }
 
-.btn:disabled {
+:is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .facet, .issue-item, .rail-item, .log-tabs button):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+:is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .facet, .issue-item, .rail-item, .log-tabs button):active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+}
+
+:is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .facet, .issue-item, .rail-item, .log-tabs button) {
+  transition:
+    border-color 0.16s var(--ease-out),
+    background 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    box-shadow 0.16s var(--ease-out),
+    transform 0.12s var(--ease-out);
+}
+
+:is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .facet, .issue-item):disabled {
   cursor: not-allowed;
   color: var(--text-faint);
+}
+
+/* 不带底色的那两档改回透明，圆角跟着共用配方走药丸。账号条目保留等宽字。 */
+.tool-btn,
+.account-item {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.account-item {
+  font-family: var(--mono);
+}
+
+.btn {
+  position: relative;
+  padding: 8px 13px;
+  color: var(--text);
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 
 .btn[data-tone="accent"] {
@@ -875,12 +1468,40 @@ input[type="text"]:focus {
 .btn[data-tone="ghost"] {
   background: transparent;
   border-color: transparent;
+  box-shadow: none;
   color: var(--text-dim);
 }
 
 .btn[data-tone="ghost"]:hover:not(:disabled) {
-  background: var(--hover);
-  border-color: var(--line);
+  background: var(--btn-hover-bg);
+  border-color: var(--btn-line);
+}
+
+/* 小红点：探测到有新版本、但玩家还没点过「检查更新」时，只在按钮角上催一下，不再弹窗。 */
+/* 顶栏是 flex 行：窗口一窄，按钮先被压缩、文案折行，「检查更新」这种四字标签最容易被挤歪。 */
+.topbar .btn {
+  flex-shrink: 0;
+}
+
+.btn[data-dot="on"]::after {
+  content: "";
+  position: absolute;
+  /* 按钮是药丸形，右上角的弧线离右端约 12px：点还按老位置挂在角上就会飘到曲线外面，
+     所以往里挪到顶边靠右的那段平边上。 */
+  top: -4px;
+  right: 11px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--err);
+  box-shadow: 0 0 0 2px var(--panel);
+  animation: dot-hint 1.8s ease-in-out infinite;
+}
+
+@keyframes dot-hint {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .segmented {
@@ -888,7 +1509,7 @@ input[type="text"]:focus {
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--line);
-  border-radius: 11px;
+  border-radius: 999px;
   background: var(--field-bg);
 }
 
@@ -898,7 +1519,7 @@ input[type="text"]:focus {
   cursor: pointer;
   padding: 8px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-dim);
   font-family: var(--sans);
@@ -920,7 +1541,7 @@ input[type="text"]:focus {
   appearance: none;
   cursor: pointer;
   border: 0;
-  border-radius: 9px;
+  border-radius: 999px;
   background: transparent;
   color: inherit;
   font-family: inherit;
@@ -942,7 +1563,8 @@ input[type="text"]:focus {
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--field-bg);
-  transition: background 0.18s ease, border-color 0.18s ease;
+  /* 底色比滑块慢半拍换完：滑块已经到了、颜色还在路上，那一下才读得出「翻了个面」。 */
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .switch-track::after {
@@ -954,7 +1576,10 @@ input[type="text"]:focus {
   height: 15px;
   border-radius: 50%;
   background: var(--text-faint);
-  transition: transform 0.18s ease, background 0.18s ease;
+  /* 位移交给 translate，形变交给 animation 里的 scale，两者是不同属性才不会互相顶掉：
+     translate 负责「扔过去」，scale 负责飞行途中被拉长的这一帧。 */
+  translate: 0 0;
+  transition: translate 0.4s var(--ease-snap), background 0.3s ease;
 }
 
 .switch[data-on="true"] .switch-track {
@@ -963,8 +1588,53 @@ input[type="text"]:focus {
 }
 
 .switch[data-on="true"] .switch-track::after {
-  transform: translateX(19px);
+  translate: 19px 0;
   background: var(--accent);
+}
+
+/* 滑块被拽向目的地：起端钉在出发那一侧（transform-origin），所以头先探出去、尾被拉长，
+   到位后再压回去一点。开与关只差这一钉的方向。动画名随 data-on 变更而切换，
+   于是每按一次都是重播，不需要 JS 参与。 */
+@media (prefers-reduced-motion: no-preference) {
+  .switch[data-on="true"] .switch-track::after {
+    transform-origin: 0 50%;
+    animation: knob-toss-right 0.42s var(--ease-out);
+  }
+
+  .switch[data-on="false"] .switch-track::after {
+    transform-origin: 100% 50%;
+    animation: knob-toss-left 0.42s var(--ease-out);
+  }
+}
+
+@keyframes knob-toss-right {
+  0% {
+    scale: 1 1;
+  }
+  38% {
+    scale: 1.42 0.74;
+  }
+  72% {
+    scale: 0.9 1.08;
+  }
+  100% {
+    scale: 1 1;
+  }
+}
+
+@keyframes knob-toss-left {
+  0% {
+    scale: 1 1;
+  }
+  38% {
+    scale: 1.42 0.74;
+  }
+  72% {
+    scale: 0.9 1.08;
+  }
+  100% {
+    scale: 1 1;
+  }
 }
 
 .path {
@@ -1037,6 +1707,19 @@ input[type="text"]:focus {
     .sheet {
       transform: none;
     }
+  }
+  .account-pop {
+    animation: none;
+  }
+    /* 减弱动效时绕边高光与进度环都停成静止：仍表示「还在收尾 / 还在下载」，但不转。 */
+  .toggle__sweep::before,
+  .frame__march,
+  .launch-toggle:is(:hover, :focus-visible):not(:disabled) .glyph {
+    animation: none;
+  }
+
+  .frame__march {
+    stroke-dasharray: 100;
   }
 }
 
@@ -1169,6 +1852,14 @@ pre.evidence {
   font-size: 11.5px;
   color: var(--text-faint);
   font-family: var(--mono);
+}
+
+/* 底栏两条路径能长到几十字：折行会把整条底栏顶高，省略号截断才不会。完整路径挂 title 悬停看。 */
+.statusbar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toast {
@@ -1373,7 +2064,6 @@ pre.evidence {
   font-size: 12px;
   appearance: none;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .facet:hover {
@@ -1418,7 +2108,6 @@ pre.evidence {
   text-align: left;
   appearance: none;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .issue-item:hover {
@@ -1815,6 +2504,28 @@ pre.evidence {
   overflow-y: auto;
 }
 
+.save-row {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+}
+
+.save-row .save-item {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 删除是一行里唯一会让东西变少的动作：平时压暗，悬停才转成错误色。 */
+.save-kill:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--err-ink);
+}
+
+.save-kill:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 .save-item {
   display: flex;
   flex-direction: column;
@@ -1847,6 +2558,7 @@ pre.evidence {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .save-item > span {
@@ -1859,4 +2571,651 @@ pre.evidence {
   font-style: normal;
   font-size: 11.5px;
   color: var(--warn-ink);
+}
+
+/* --------------------------------------------- 主页左下角那张更新日志卡片 */
+
+/* 底边与右下角那枚起停开关同一条线（都是 bottom: 48px），左边与开关离右边那条留白同一个数。
+   这张卡与开关挂在同一个定位祖先 .pane 上（实测 offsetParent 就是它），量的都是内容区自己的边，
+   不含左侧那条 68 栏——早先按「窗口左边」写成 68+1+20=89，等于把栏宽重复算了一次。
+   横向只占整扇窗口的四分之一（vw 量的就是窗口宽，与定位祖先是谁无关）。 */
+.log-card {
+  position: absolute;
+  left: 22px;
+  bottom: 48px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 25vw;
+  /* 高度按合并前那两张卡的整块足迹来（128 + 12 间距 + 128）：底边钉在开关那条线上，
+     顶边也就回到原来的位置，合成一张卡不该让这块区域凭空矮一截。 */
+  min-height: 268px;
+  animation: log-card-in 0.36s var(--ease-out) both;
+}
+
+/* 页签照「活动 / 公告 / 新闻」那种：不带底色，选中那条下面压一道主色横线。 */
+.log-tabs {
+  display: flex;
+  gap: 20px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.log-tabs button {
+  position: relative;
+  appearance: none;
+  padding: 0 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+}
+
+.log-tabs button::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transition: transform 0.2s var(--ease-out);
+}
+
+.log-tabs button[aria-selected="true"] {
+  color: var(--accent-ink);
+}
+
+.log-tabs button[aria-selected="true"]::after {
+  transform: scaleX(1);
+}
+
+.log-slot {
+  flex: 1;
+  min-height: 0;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--sunken) 55%, transparent);
+}
+
+@keyframes log-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ----------------------------------------------------------- 配色方案选择器 */
+
+.scheme-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* 配色方案就是一排圆：方案名走 title 与 aria-label，选中项的名字写在下面那行提示里。
+   圆形按钮自己仍吃统一配方（边框、同一套过渡与按下反馈），只把圆角改成 50%。
+   选择器要带一层 .scheme-grid：统一配方那条是 :is(.btn, .segmented button, …)，
+   :is() 取参数里最高的特异度（.segmented button = 类+类型），单写 .scheme 追不上它，
+   圆角会被那条的 var(--btn-radius) 顶掉。 */
+.scheme-grid .scheme {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+/* 色板预览的是这块色卡自己那套方案。
+   注意不能写 var(--accent)：那个变量声明在 :root 上，它自己的 var(--hue) 早就按根节点的
+   方案代入完了，继承下来的是成品颜色，按钮上重设的 --hue 追不回去。
+   所以这里直接按同一公式就地取 --hue/--chroma——这两个是纯数字，能跟着按钮走。
+   亮度 79%/63% 与 --accent / --accent-deep 一致，明暗主题下都不变。 */
+.scheme-plate {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    linear-gradient(120deg, oklch(79% var(--chroma) var(--hue)) 0%, oklch(63% var(--chroma) var(--hue)) 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text) 14%, transparent);
+  transition:
+    transform 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out);
+}
+
+.scheme:hover:not(:disabled) .scheme-plate {
+  transform: scale(0.92);
+}
+
+.scheme[aria-pressed="true"] {
+  color: var(--text);
+}
+
+.scheme[aria-pressed="true"] .scheme-plate {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--text) 14%, transparent),
+    0 0 0 2px var(--panel),
+    0 0 0 4px var(--accent);
+}
+
+/* ------------------------------------------------------------------ 滚动条 */
+
+/* 全局收一遍：默认的方块条在这套底色上太抢，亮色下还是一道硬灰。
+   轨道透明、滑块靠两层透明边框收细，悬停时才上主色。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sb-thumb) var(--sb-track);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--sb-track);
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: var(--sb-thumb);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--sb-thumb-hot);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------- 下拉面板 */
+
+/* 所有下拉框先统一到按钮那套几何，再谈弹层。 */
+select {
+  appearance: none;
+  cursor: pointer;
+  border: 1px solid var(--btn-line);
+  border-radius: var(--btn-radius);
+  background: var(--btn-bg);
+  color: var(--text);
+  font-family: var(--sans);
+  transition:
+    border-color 0.16s var(--ease-out),
+    background 0.16s var(--ease-out),
+    box-shadow 0.16s var(--ease-out);
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--btn-hover-line);
+  background: var(--btn-hover-bg);
+}
+
+select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+select:disabled {
+  cursor: not-allowed;
+  color: var(--text-faint);
+}
+
+/* base-select 是新能力：拿到浏览器允许我们自己画那颗箭头和弹层。
+   整块包在 @supports 里——不支持的宿主继续用系统原生弹层，选择器不认识就整条丢掉，不会写坏外观。 */
+@supports (appearance: base-select) {
+  select {
+    appearance: base-select;
+  }
+
+  select::picker-icon {
+    color: var(--text-dim);
+    transition: rotate 0.18s var(--ease-out);
+  }
+
+  select:open::picker-icon {
+    rotate: 180deg;
+  }
+
+  select::picker(select) {
+    padding: 6px;
+    border: 1px solid var(--btn-hover-line);
+    border-radius: 12px;
+    /* 不限高，弹层就按选项总数一路长到窗口外面（UA 给的是 max-height: stretch）：
+       底下那截被窗口边切掉，圆角看不见，整块看着像系统原生列表。热键那枚有 40 多个候选，
+       最容易顶穿。限在一屏之内，靠上/靠下由 UA 的 position-try 自己翻。 */
+    max-height: min(340px, 46vh);
+    overscroll-behavior: contain;
+    background: var(--picker-bg);
+    color: var(--text);
+    box-shadow: 0 18px 44px var(--shadow);
+    transition:
+      opacity 0.16s var(--ease-out),
+      scale 0.16s var(--ease-out),
+      display 0.16s allow-discrete;
+  }
+
+  @starting-style {
+    select::picker(select) {
+      opacity: 0;
+      scale: 0.97;
+    }
+  }
+
+  select option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border-radius: var(--btn-radius-sm);
+    color: var(--text-dim);
+    font-size: 12.5px;
+    transition:
+      background 0.12s var(--ease-out),
+      color 0.12s var(--ease-out);
+  }
+
+  select option:hover {
+    background: var(--btn-hover-bg);
+    color: var(--text);
+  }
+
+  select option:checked {
+    background: var(--rail-active);
+    color: var(--accent-ink);
+  }
+}
+
+/* ------------------------------------------------------------- 动效补一轮
+   只给「可操作」的东西加：侧边栏当前项那根指示条、开关滑块、chip、色卡、下按位移。
+   这个块排在所有组件规则之后，否则同特异度下会被上面的规则盖回去。 */
+
+/* 侧边栏：高亮做成一枚会滑的胶囊，指示条挂在它身上一起走。
+   换页时胶囊从旧图标滑到新图标（包括跨过侧栏底部那一次大跳），比「旧底色淡掉 + 新底色浮起」
+   更能说明「你刚从哪来、现在在这」；两根各自动画的条会变成四处闪。
+   位置由 JS 量当前项的矩形后写进 --rail-x/--rail-y，行程时长跟着实际距离伸缩
+   （跳一次底部那一大格和挪一格不该一样快），所以这里 left/top 一律 0。
+   视觉在 .rail-marker__body 上，形变动画挂到那枚内层，外层只管位移：
+   内层靠 React 的 key 每次换页重建，动画才播得起来，而外层重建会把滑动弄丢。 */
+.rail {
+  position: relative;
+}
+
+.rail-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  pointer-events: none;
+  opacity: 0;
+  translate: var(--rail-x, 0px) var(--rail-y, 0px);
+  transition:
+    translate var(--rail-travel, 0.32s) var(--ease-rail),
+    opacity 0.2s ease;
+}
+
+.rail-marker__body {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--rail-active);
+}
+
+.rail-marker[data-ready="on"] {
+  opacity: 1;
+}
+
+/* 第一次测量前 transform 还是 0；那一次若开着过渡，会看见胶囊从侧栏顶端掉进当前位置。
+   未就绪时关掉过渡，让「定位」和「显形」落在同一帧。 */
+.rail-marker:not([data-ready]) {
+  transition: none;
+}
+
+.rail-marker__body::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  width: 3px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: translateY(-50%);
+}
+
+/* 和开关滑块同一套手感：飞的时候沿运动方向被拉长，落位那一瞬压回去一点。
+   origin 钉在出发那一侧，所以是先探头、后收脚；方向由 JS 按这次实际位移写进 data-dir。
+   比开关软一档：胶囊是「顺带」在动的东西，幅度只需要够读出重量，峰值压到 1.13 上下；
+   逐段用 ease-in-out（开关用 --ease-out，那段是瞬时冲到位再吊着），形变就是呼吸而不是抽一下。 */
+@media (prefers-reduced-motion: no-preference) {
+  .rail-marker__body[data-dir="down"] {
+    transform-origin: 50% 0;
+    animation: rail-toss-down var(--rail-travel, 0.32s) ease-in-out;
+  }
+
+  .rail-marker__body[data-dir="up"] {
+    transform-origin: 50% 100%;
+    animation: rail-toss-up var(--rail-travel, 0.32s) ease-in-out;
+  }
+}
+
+@keyframes rail-toss-down {
+  0% {
+    scale: 1 1;
+  }
+  45% {
+    scale: 0.92 1.13;
+  }
+  78% {
+    scale: 1.03 0.97;
+  }
+  100% {
+    scale: 1 1;
+  }
+}
+
+@keyframes rail-toss-up {
+  0% {
+    scale: 1 1;
+  }
+  45% {
+    scale: 0.92 1.13;
+  }
+  78% {
+    scale: 1.03 0.97;
+  }
+  100% {
+    scale: 1 1;
+  }
+}
+
+/* 换页：这一页的子树是新挂载的节点，所以入场动画只在「换页」那一次播；
+   同页里的普通重渲染不重建节点，动画不会重播，也不会一有状态变化就整页闪一下。
+   主页单独走纯淡入——那面更新日志卡是 position:absolute 挂在窗口上的，
+   容器一旦带 transform 就变成它的锚点，卡片会在动画首尾各跳一次位。
+   其余各页都在正常流里，可以带上移。 */
+@media (prefers-reduced-motion: no-preference) {
+  .page > * {
+    animation: page-in 0.26s var(--ease-out) both;
+  }
+  .page > .home-stage {
+    animation-name: page-fade;
+  }
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes page-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.chip {
+  transition:
+    color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+/* 按下那一瞬整档收平（含悬停那层渐变与光晕），松手又回到悬停态。 */
+.account-pill:active,
+.launch-toggle:active:not(:disabled) {
+  --active: 0;
+}
+
+/* 滑块那两行旧的 transition 声明已删：它现在动的是 translate（行程）加 scale（形变），
+   留在这里会把下面基础规则里的 0.4s 抛掷行程改回 0.24s 的 transform，动画白做。 */
+
+/* 减弱动效：本轮这几处进场、缩放与下按位移全部收掉。 */
+@media (prefers-reduced-motion: reduce) {
+  .log-card {
+    animation: none;
+  }
+  .scheme:hover:not(:disabled) .scheme-plate,
+  .scheme[aria-pressed="true"] .scheme-plate,
+  :is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .facet, .issue-item, .rail-item, .log-tabs button):active:not(:disabled) {
+    transform: none;
+  }
+  .log-tabs button::after {
+    transition: none;
+  }
+  /* 抛掷感全收：滑块与胶囊直接落位，颜色也不做慢半拍。 */
+  .rail-marker,
+  .switch-track,
+  .switch-track::after {
+    transition: none;
+  }
+  .rail-marker__body,
+  .switch[data-on] .switch-track::after {
+    animation: none;
+  }
+  select::picker(select) {
+    transition: none;
+  }
+}
+
+/* ============================================================== 液态玻璃层 */
+
+/* 开关在设置页（launcher.glass → :root[data-glass]）：关着的时候下面整块都不匹配，一个合成层都不建。
+   做法是「表面不动，动的是它的 ::before」——底板那层挂 backdrop-filter，文字与控件留在正常流里，
+   所以糊的只有材质。JS 只剩一条 --glass-mx/--glass-my，边框那圈高光按它偏角。 */
+
+:root {
+  --glass-mx: 0;
+  --glass-my: 0;
+}
+
+:root[data-theme="dark"] {
+  --glass-veil: rgba(15, 17, 23, 0.17);
+  --glass-blur: 14px;
+  --glass-sat: 165%;
+  --glass-hair: rgba(255, 255, 255, 0.44);
+  /* 按钮那一档比卡片再薄一点：药丸小，同样的纱厚了就成一坨灰块，看不出透光。 */
+  --glass-btn-veil: rgba(255, 255, 255, 0.07);
+  --glass-btn-lift: rgba(255, 255, 255, 0.16);
+}
+
+:root[data-theme="light"] {
+  /* 亮色要和暗色是同一块玻璃：纱的浓度、模糊、饱和照抄暗色那一档，只把色调换成白。
+     早先这里压到 0.82 是为了保文字对比，代价是卡片成一堵白墙。这么薄的纱兜不住可读性，
+     交给正文那一档档抬深的字色（见 :root 的 --text*）和玻璃+壁纸时那圈 --text-halo 描影。 */
+  --glass-veil: rgba(252, 252, 255, 0.17);
+  --glass-blur: 14px;
+  --glass-sat: 165%;
+  /* 白色高光线压在浅底上等于没画，亮色这圈改成浅灰的「压暗」边，相邻卡片之间才有分界。 */
+  --glass-hair: rgba(96, 100, 122, 0.34);
+  --glass-btn-veil: rgba(255, 255, 255, 0.45);
+  --glass-btn-lift: rgba(255, 255, 255, 0.75);
+}
+
+/* 表面先退成一块空框：原本的底色与描边都交给 ::before / ::after 两层。 */
+:root[data-glass="on"] :is(.card, .blank, .sheet) {
+  position: relative;
+}
+
+:root[data-glass="on"] .log-card {
+  position: absolute;
+}
+
+:root[data-glass="on"] :is(.card, .blank, .sheet, .account-pop) {
+  isolation: isolate;
+  /* 这里原本还有一条 overflow: clip：那是折射 SVG 滤镜的前提（宿主不裁切时 Chromium 会把宿主自己
+     的内容一起喂给滤镜，卡片里的字全成重影）。滤镜撤了它就不是前提，反而会把设置页那圈悬停的
+     「上报范围」浮层裁在卡片里，所以跟着撤。 */
+  border-color: transparent;
+  background: transparent;
+  /* 有背景时这条规则原本把模糊挂在卡片自己身上，玻璃化后要挪到 ::before，否则糊两次。 */
+  backdrop-filter: none;
+}
+
+:root[data-glass="on"] :is(.card, .blank, .sheet, .account-pop)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--glass-veil);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+}
+
+/* 一圈只有 1px 的高光边：用两层渐变遮罩相减，只留边框那条缝，角度跟着光标走。 */
+:root[data-glass="on"] :is(.card, .blank, .sheet, .account-pop)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    calc(126deg + var(--glass-mx) * 46deg),
+    transparent 0%,
+    var(--glass-hair) calc(40% + var(--glass-my) * 20%),
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+/* 亮色底上 screen/overlay 都推不出边界：亮主题的 --glass-hair 已经是浅灰，改用 multiply 把它压成一条真边。 */
+:root[data-glass="on"][data-theme="light"] :is(.card, .blank, .sheet, .account-pop)::after,
+:root[data-glass="on"][data-theme="light"] :is(.segmented button, .scheme, .btn, .tool-btn, .account-item)::before {
+  mix-blend-mode: multiply;
+}
+
+/* ------------------------------------------------------------ 玻璃下的按钮
+   统一配方那五类控件整体改透光磨砂。和卡片不同的是：模糊直接挂在控件自己身上——
+   backdrop-filter 只糊它身后那一叠，不动它自己的文字，所以 ::before 留给跟光标的高光边，
+   ::after 空出来给「检查更新」那颗小红点（红点必须挂在按钮角上，只有 ::after 能用）。
+   纱比卡片再薄一档：药丸小，同样的浓度糊上去就成一坨灰块，反而看不出透光。 */
+:root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme) {
+  position: relative;
+  isolation: isolate;
+  border-color: transparent;
+  box-shadow: none;
+  background: var(--glass-btn-veil);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+}
+
+/* 带语义色的两档把纱换成自己的色：撤了边框就靠这块底认身份，透但仍是那枚按钮。 */
+:root[data-glass="on"] .btn[data-tone="accent"] {
+  background: color-mix(in oklab, var(--accent) 55%, transparent);
+}
+
+:root[data-glass="on"] .btn[data-tone="danger"] {
+  background: color-mix(in oklab, var(--err) 55%, transparent);
+}
+
+/* 静止不砌玻璃的三档（图标按钮、账号条目、ghost）：悬停才透出来一层，
+   否则一排图标按钮全变成药丸，比原版还重。 */
+:root[data-glass="on"] :is(.tool-btn, .account-item),
+:root[data-glass="on"] .btn[data-tone="ghost"] {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+:root[data-glass="on"] :is(.tool-btn, .account-item, .btn):hover:not(:disabled) {
+  background: var(--glass-btn-lift);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+}
+
+/* 高光边：与卡片同一份配方，只把半径交给药丸自己（inherit），角度跟着光标走。 */
+:root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    calc(126deg + var(--glass-mx) * 46deg),
+    transparent 0%,
+    var(--glass-hair) calc(40% + var(--glass-my) * 20%),
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.16s var(--ease-out);
+}
+
+/* 静止就有底的那几档才挂高光边；hover 才砌玻璃的那三档等 hover 再挂。 */
+:root[data-glass="on"] :is(.segmented button, .scheme)::before,
+:root[data-glass="on"] .btn:not([data-tone="ghost"])::before,
+:root[data-glass="on"] :is(.btn, .tool-btn, .account-item):hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+/* 分段控件选中那一项在玻璃下也要一眼分得出来：纱抬满一档并把原来那圈内描边描回来
+   （上面统一配方把边框和投影都清了，不补这一条就只剩文字色在区分选中）。 */
+:root[data-glass="on"] .segmented button[aria-pressed="true"] {
+  background: var(--glass-btn-lift);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* ------------------------------------------------------ 玻璃下的正文描影
+   浅模糊底撤掉之后，字是直接压在壁纸上的：只抬文字颜色不够，壁纸亮的那一块照样吃字。
+   所以给「开着玻璃又设了壁纸」的整扇窗口挂一圈紧贴的描影，靠继承一路发到 .hint 那档最小的字。
+   没设壁纸时不挂——那一面本来就是不透明面板，加影只会让字发虚。 */
+:root[data-glass="on"] .app[data-bg="on"] {
+  text-shadow: var(--text-halo);
+}
+
+/* 表单控件是这条规则的例外：浏览器给 button/input 的 text-shadow 初值就是 none，
+   不吃继承（实测 .field 有影、里面的 button.switch 算成 none，开关那行 .hint 说明跟着掉影）。
+   开关、分段按钮里的说明文字正是最小最需要影的一档，所以显式让它们继承父层。 */
+:root[data-glass="on"] .app[data-bg="on"] :is(button, input, select, textarea) {
+  text-shadow: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 光泽角是纯着色，不动几何；但跟随光标本身算动，这里直接钉死成一个角度——
+     卡片（::after）与按钮（::before）各钉一条，弹性形变那一档已随折射整条撤掉。 */
+  :root[data-glass="on"] :is(.card, .blank, .sheet, .account-pop)::after,
+  :root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme)::before {
+    background: linear-gradient(126deg, transparent 0%, var(--glass-hair) 40%, transparent 100%);
+  }
 }

@@ -4,6 +4,7 @@ use crate::logbus::Bus;
 use crate::session::Session;
 
 mod autofire;
+mod background;
 mod commands;
 mod config;
 mod health;
@@ -62,6 +63,10 @@ pub fn run() {
                 commands::APP_VERSION
             ));
             bus.info(format!("数据目录：{}", app_dir.display()));
+            // 背景素材留在玩家选的原始位置，启动时只把记着的那一条放进 asset 白名单。
+            if let Err(err) = background::apply_scope(&app.handle().clone(), &root) {
+                bus.warn(err);
+            }
             if let Some(win) = app.get_webview_window("main") {
                 if let Ok(url) = win.url() {
                     bus.info(format!("界面地址：{url}"));
@@ -101,6 +106,8 @@ pub fn run() {
             commands::set_server_mod,
             commands::set_client_mod,
             commands::import_client_mod,
+            commands::import_server_mod,
+            commands::open_modkit_dir,
             commands::autofire_get,
             commands::autofire_live,
             commands::autofire_set_master,
@@ -109,6 +116,10 @@ pub fn run() {
             commands::saves_state,
             commands::saves_backup,
             commands::saves_restore,
+            commands::saves_delete,
+            commands::background_state,
+            commands::background_pick,
+            commands::background_clear,
             commands::set_auto_report,
             commands::reports_retry,
             commands::feedback_meta,

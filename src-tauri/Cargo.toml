@@ -17,7 +17,7 @@ prod = ["tauri/custom-protocol"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
@@ -25,6 +25,8 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 sha2 = "0.11.1"
+# 只为主页壁纸取一个主题色：四种收进白名单的位图格式各留一个解码器，别把整 crate 拉进来。
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"

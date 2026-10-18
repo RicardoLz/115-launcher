@@ -1,9 +1,9 @@
 //! 开发者页的停靠层：一棵二分树（叶子=面板，内节点=分割）。
 //! 这里只有纯数据与纯函数，命中测试用 CSS 像素，DOM 一律不碰。
 
-export type PanelKey = "log" | "mode";
+export type PanelKey = "log" | "mode" | "mods" | "modkit";
 
-export const PANEL_KEYS: PanelKey[] = ["log", "mode"];
+export const PANEL_KEYS: PanelKey[] = ["log", "mode", "mods", "modkit"];
 
 export type Dir = "v" | "h";
 export type Edge = "top" | "bottom" | "left" | "right";
@@ -20,9 +20,21 @@ export type Zone = { k: PanelKey; edge: Edge | null };
 export const DEFAULT_DOCK: DockNode = {
   t: "split",
   dir: "v",
-  r: 0.66,
+  r: 0.52,
   a: { t: "leaf", k: "log" },
-  b: { t: "leaf", k: "mode" },
+  b: {
+    t: "split",
+    dir: "h",
+    r: 0.34,
+    a: { t: "leaf", k: "mode" },
+    b: {
+      t: "split",
+      dir: "v",
+      r: 0.5,
+      a: { t: "leaf", k: "mods" },
+      b: { t: "leaf", k: "modkit" },
+    },
+  },
 };
 
 const EDGE_DIR: Record<Edge, Dir> = { top: "v", bottom: "v", left: "h", right: "h" };

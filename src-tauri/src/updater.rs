@@ -64,6 +64,11 @@ fn tag_path(root: &Root) -> PathBuf {
     root.path.join(".server-update-tag")
 }
 
+/// 发布包的落点。下载这一侧与界面进度监视认同一条路径，免得两处各拼各的。
+pub fn zip_target(asset_name: &str) -> PathBuf {
+    std::env::temp_dir().join(DOWNLOAD_CACHE_DIR).join(asset_name)
+}
+
 pub fn current_tag(root: &Root) -> Option<String> {
     std::fs::read_to_string(tag_path(root))
         .ok()
@@ -129,7 +134,7 @@ pub fn apply(root: &Root, info: &UpdateCheck, bus: &Bus) -> Result<String, Strin
 
     let cache_dir = std::env::temp_dir().join(DOWNLOAD_CACHE_DIR);
     std::fs::create_dir_all(&cache_dir).map_err(|e| format!("创建下载缓存目录失败：{e}"))?;
-    let zip_path = cache_dir.join(&info.asset_name);
+    let zip_path = zip_target(&info.asset_name);
 
     // 已缓存且大小一致则跳过下载。
     let cached_ok = zip_path.is_file()

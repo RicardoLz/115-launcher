@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { commands, errText, type BackupItem, type SavesState } from "../bridge";
+import { TrashIcon } from "./icons";
 
 /// 服务端开着连接时整库换文件等于对着活体动底层，前后端都按这个口径拦。
 function locked(phase: string): boolean {
@@ -17,6 +18,7 @@ export default function SavesPage({
   const [picked, setPicked] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [doomed, setDoomed] = useState<BackupItem | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -60,10 +62,25 @@ export default function SavesPage({
     }
   };
 
+  /// 删除只走确认弹窗那一步：点了「删除这份备份」先问，答「确认」才真删。
+  const remove = async () => {
+    if (!doomed) return;
+    setBusy(true);
+    try {
+      const record = await commands.savesDelete(doomed.path);
+      onNotice(record.message, "ok");
+    } catch (err) {
+      onNotice(errText(err), "err");
+    } finally {
+      setDoomed(null);
+      setBusy(false);
+      await reload();
+    }
+  };
+
   const save = state?.save;
   const frozen = locked(phase);
   const usable = state?.backups.filter((item) => item.usable).length ?? 0;
-
   return (
     <div className="body">
       <div className="column">
@@ -144,23 +161,33 @@ export default function SavesPage({
 
           <div className="save-list">
             {(state?.backups ?? []).map((item: BackupItem) => (
-              <button
-                key={item.path}
-                className="save-item"
-                data-on={picked === item.path ? "true" : "false"}
-                disabled={!item.usable || busy}
-                title={item.usable ? "选它做替换源" : item.note}
-                onClick={() => {
-                  setPicked(picked === item.path ? null : item.path);
-                  setConfirming(false);
-                }}
-              >
-                <b>{item.name}</b>
-                <span>
-                  {item.modified} · {item.size_text} · 账号 {item.accounts} / 角色 {item.characters}
-                </span>
-                {item.note ? <em>{item.note}</em> : null}
-              </button>
+              <div className="save-row" key={item.path}>
+                <button
+                  className="save-item"
+                  data-on={picked === item.path ? "true" : "false"}
+                  disabled={!item.usable || busy}
+                  title={item.usable ? "选它做替换源" : item.note}
+                  onClick={() => {
+                    setPicked(picked === item.path ? null : item.path);
+                    setConfirming(false);
+                  }}
+                >
+                  <b>{item.name}</b>
+                  <span>
+                    {item.modified} · {item.size_text} · 账号 {item.accounts} / 角色 {item.characters}
+                  </span>
+                  {item.note ? <em>{item.note}</em> : null}
+                </button>
+                <button
+                  className="tool-btn save-kill"
+                  aria-label={`删除备份 ${item.name}`}
+                  title={item.is_current ? "这份就是当前正在用的存档，删不掉" : "删除这份备份"}
+                  disabled={busy || item.is_current}
+                  onClick={() => setDoomed(item)}
+                >
+                  <TrashIcon size={15} />
+                </button>
+              </div>
             ))}
           </div>
 
@@ -216,6 +243,47 @@ export default function SavesPage({
           </p>
         </section>
       </div>
+
+      {doomed ? (
+        <div className="scrim" onMouseDown={() => setDoomed(null)}>
+          <div
+            className="sheet sheet--narrow"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="sheet-head">
+              <h3>删除这份备份</h3>
+              <span className="spacer" />
+              <button className="btn" data-tone="ghost" disabled={busy} onClick={() => setDoomed(null)}>
+                返回
+              </button>
+            </header>
+            <div className="sheet-body">
+              <p className="hint">
+                要删的是 <code>{doomed.name}</code>（{doomed.size_text}，{doomed.modified}）。
+              </p>
+              <p className="hint" data-tone="err">
+                删除不经过回收站，直接从备份目录抹掉，删了就找不回来。当前存档不受影响；
+                但要是这份「替换前的自动快照」，删掉之后就退不回替换前那一面了。
+              </p>
+            </div>
+            <footer className="sheet-foot">
+              <button
+                className="btn"
+                data-tone="ghost"
+                disabled={busy}
+                onClick={() => setDoomed(null)}
+              >
+                取消
+              </button>
+              <button className="btn" data-tone="danger" disabled={busy} onClick={() => void remove()}>
+                {busy ? "正在删除…" : "确认删除"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

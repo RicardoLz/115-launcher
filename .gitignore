@@ -20,6 +20,7 @@ src-tauri/gen/schemas
 .qoder/
 .qoder-scratch/
 vibe_images/
+tmp/
 *.tmp
 
 # 编译时随手重定向的 stdout/stderr，只在本机看

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import ControlPanel from "./components/ControlPanel";
+import BackgroundLayer from "./components/BackgroundLayer";
+import GlassDefs from "./components/GlassDefs";
 import Dock from "./components/Dock";
 import FeedbackPage, { type FeedbackTab } from "./components/FeedbackPage";
+import LaunchDock, { type UpdateArm } from "./components/LaunchDock";
 import ModsPage from "./components/ModsPage";
 import QuitSheet, { type QuitChoice } from "./components/QuitSheet";
 import Rail, { PAGES, type PageKey } from "./components/Rail";
@@ -14,6 +16,7 @@ import { PANELS } from "./components/panels";
 import { HealthSheet, PortsSheet } from "./components/ReportSheet";
 import WindowControls from "./components/WindowControls";
 import { DEFAULT_DOCK, leaves, place, type DockNode, type PanelKey, type Zone } from "./dock";
+import { useGlideScroll } from "./glide";
 import { useTheme } from "./theme";
 import {
   commands,
@@ -21,6 +24,7 @@ import {
   events,
   PHASE_LABEL,
   type AppInfo,
+  type BackgroundState,
   type ConfigView,
   type HealthReport,
   type Phase,
@@ -29,6 +33,7 @@ import {
   type SelfUpdateCheck,
   type ServerUpdateCheck,
   type Status,
+  type UpdateProgress,
 } from "./bridge";
 
 type SheetKind = "health" | "ports" | "quit" | null;
@@ -53,27 +58,41 @@ export default function App() {
   const [ports, setPorts] = useState<PortReport | null>(null);
   const [portHint, setPortHint] = useState("");
   const [notice, setNotice] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
+  // 主页背景素材：路径与类型都由 Rust 侧给，这里只负责摆出来和刷新。
+  const [background, setBackground] = useState<BackgroundState | null>(null);
   const [page, setPage] = useState<PageKey>("home");
   const [feedbackTab, setFeedbackTab] = useState<FeedbackTab>("board");
+  // 更新日志合成一张卡，靠这页签切「客户端 / 启动器」。
+  const [logTab, setLogTab] = useState<"client" | "launcher">("client");
   const [dock, setDock] = useState<DockNode | null>(DEFAULT_DOCK);
-  const [floating, setFloating] = useState<Record<PanelKey, boolean>>({ log: false, mode: false });
+  const [floating, setFloating] = useState<Record<PanelKey, boolean>>({
+    log: false,
+    mode: false,
+    mods: false,
+    modkit: false,
+  });
   /// 独立窗口正被拖回主窗：这个落点交给停靠层画窗口内的吸附提示。
   const [panelHover, setPanelHover] = useState<{ panel: PanelKey; x: number; y: number } | null>(
     null,
   );
   // 首次的上传范围说明：一次会话只问一遍，没答就下次再问，不替玩家默认打开。
   const [consentDone, setConsentDone] = useState(false);
-  // 启动时后台探测到可更新的服务端：弹层问要不要现在更。
-  const [updatePrompt, setUpdatePrompt] = useState<ServerUpdateCheck | null>(null);
-  // 启动器自身更新提示。
-  const [selfUpdatePrompt, setSelfUpdatePrompt] = useState<SelfUpdateCheck | null>(null);
-  const [checkingSelfUpdate, setCheckingSelfUpdate] = useState(false);
+  // 更新不再一启动就弹窗：探测到结果先存着，只在「检查更新」上点一颗小红点。
+  const [selfCheck, setSelfCheck] = useState<SelfUpdateCheck | null>(null);
+  const [serverCheck, setServerCheck] = useState<ServerUpdateCheck | null>(null);
+  // 玩家点过「检查更新」且确有新版本，右下角那枚开关才交给更新。
+  const [armed, setArmed] = useState<UpdateArm | null>(null);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   // 部署中（首次部署 / 更新部署）的状态文字，显示在顶部状态栏。
   const [deployLabel, setDeployLabel] = useState<string | null>(null);
-  const { theme, toggleTheme } = useTheme();
+  const { theme, toggleTheme, scheme, setScheme, glass, setGlass } = useTheme();
   /// 停靠层把命中测试借出来：独立窗口拖回来时按落点挑吸附槽。
   const hitRef = useRef<((x: number, y: number) => Zone | null) | null>(null);
   const noticeTimer = useRef<number | null>(null);
+  // 主内容区就是这一页唯一的滚动容器：滚轮与拖拽的缓冲滚动都挂在它身上。
+  const pageRef = useRef<HTMLElement | null>(null);
+  useGlideScroll(pageRef);
 
   const flash = useCallback((text: string, tone: "ok" | "err" = "ok") => {
     setNotice({ text, tone });
@@ -162,8 +181,10 @@ export default function App() {
           })();
         }),
         events.onServerUpdateAvailable((info) => {
-          setUpdatePrompt(info);
+          // 只记账，不弹窗：小红点等玩家自己点「检查更新」。
+          if (info.has_update) setServerCheck(info);
         }),
+        events.onUpdateProgress((next) => setProgress(next)),
       ]);
       if (alive) stops.push(...got);
       else got.forEach((stop) => stop());
@@ -200,17 +221,27 @@ export default function App() {
     take(commands.status(), setStatus);
     take(commands.readiness(), setReadiness);
     take(commands.config(), setConfig);
-    // 启动器自身更新：探测失败就当没有，不打扰玩家。
+    take(commands.backgroundState(), setBackground);
+    // 启动器自身更新：探测到新版本只记着（界面点小红点），不再自动弹对话框；失败就当没有。
     commands
       .selfUpdateCheck()
       .then((r) => {
-        if (alive && r.has_update) setSelfUpdatePrompt(r);
+        if (alive && r.has_update) setSelfCheck(r);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
   }, [flash]);
+
+  // 壁纸主题色挂到根节点：后端取到就写，取不到（没背景/视频/坏图/整张灰）就摘掉，
+  // 样式里每一处 var(--wall-accent, 各自原值) 会自动退回原色，所以不需要前端再兜一份默认值。
+  useEffect(() => {
+    const root = document.documentElement;
+    const accent = background?.accent ?? "";
+    if (accent === "") root.style.removeProperty("--wall-accent");
+    else root.style.setProperty("--wall-accent", accent);
+  }, [background]);
 
   // 点标题栏的关闭：先问三选一，别把环境丢在那儿就走。
   useEffect(() => {
@@ -335,26 +366,81 @@ export default function App() {
       await commands.quit(choice);
     });
 
-  const applyPromptedUpdate = async () => {
-    if (!updatePrompt) return;
-    setUpdatePrompt(null);
-    setDeployLabel("更新部署中");
-    await act("更新服务端", async () => {
-      const rec = await commands.serverUpdateApply();
-      flash(rec.message);
-    });
-    setDeployLabel(null);
-    void refresh();
+  // 「检查更新」把两条更新各问一遍，有版本可取就把它交到右下角那枚开关上。
+  // 先启动器、后服务端：自更完会重启进程，服务端那一轮重启后自然还能再检。
+  const checkUpdates = async () => {
+    setCheckingUpdate(true);
+    try {
+      const self = await commands.selfUpdateCheck();
+      setSelfCheck(self.has_update ? self : null);
+      if (self.has_update) {
+        setArmed({ kind: "self", target: `v${self.latest_version}` });
+        flash(`启动器有新版本 v${self.latest_version}，按右下角「更新版本」开始`);
+        return;
+      }
+      const server = await commands.serverUpdateCheck();
+      setServerCheck(server.has_update ? server : null);
+      if (server.has_update) {
+        setArmed({ kind: "server", target: server.latest_tag });
+        flash(`服务端有新版本 ${server.latest_tag}，按右下角「更新版本」开始`);
+        return;
+      }
+      setArmed(null);
+      flash(`当前已是最新（启动器 v${self.current_version}）`);
+    } catch (err) {
+      flash(`检查更新失败：${errText(err)}`, "err");
+    } finally {
+      setCheckingUpdate(false);
+    }
   };
+
+  const applyUpdate = async () => {
+    if (!armed || progress !== null) return;
+    const kind = armed.kind;
+    // 先把环点上，下载事件还没来之前也不能让人重复按。
+    setProgress({ kind, phase: "download", percent: 0, text: "准备下载…" });
+    try {
+      const record =
+        kind === "self" && selfCheck
+          ? await commands.selfUpdateApply(selfCheck)
+          : await commands.serverUpdateApply();
+      flash(record.message);
+      if (kind === "self") {
+        // 替换脚本正在后台等这个进程退出：界面停在「正在替换…」，由新进程接管。
+        setProgress({ kind: "self", phase: "deploy", percent: 100, text: record.message });
+        window.setTimeout(() => void commands.quit("keep"), 1500);
+        return;
+      }
+      setProgress(null);
+      setArmed(null);
+      setServerCheck(null);
+      await refresh();
+    } catch (err) {
+      setProgress(null);
+      flash(`更新失败：${errText(err)}`, "err");
+    }
+  };
+
+  // 小红点 = 探测到有版本还没处理；接管给开关之后就不再点，避免两处同时催。
+  const updateDot = armed === null && (selfCheck !== null || serverCheck !== null);
 
   const busy = working || status.phase === "starting" || status.phase === "stopping";
   const running = status.phase === "running";
   const canStart = readiness?.can_start ?? false;
+  // 按下之前就得知道会起什么，只是不再占主页一块文字，收进开关的悬停提示。
+  const startHint = !canStart
+    ? (readiness?.detail ?? "还没满足启动条件，先去设置页确认客户端目录")
+    : launchMode === "server-only"
+      ? "本次：仅服务端（不拉起 DFO.exe，设置页可改）"
+      : "本次：原生启动（网关 + 客户端，设置页可改）";
 
   const current = PAGES.find((item) => item.key === page) ?? PAGES[0];
+  const hasBackground = background !== null && background.exists && background.kind !== "none";
 
   return (
-    <div className="app">
+    <div className="app" data-bg={hasBackground ? "on" : "off"} data-page={page}>
+      {glass === "on" ? <GlassDefs /> : null}
+      <BackgroundLayer view={background} onProblem={(text) => flash(text, "err")} />
       <div className="shell">
         <Rail page={page} onSelect={setPage} />
         <div className="pane">
@@ -390,141 +476,101 @@ export default function App() {
                 </button>
                 <button
                   className="btn"
-                  disabled={checkingSelfUpdate}
-                  onClick={async () => {
-                    setCheckingSelfUpdate(true);
-                    try {
-                      const info = await commands.selfUpdateCheck();
-                      if (info.has_update) setSelfUpdatePrompt(info);
-                      else flash(`当前已是最新（v${info.current_version}）`);
-                    } catch (err) {
-                      flash(`检查更新失败：${errText(err)}`, "err");
-                    } finally {
-                      setCheckingSelfUpdate(false);
-                    }
-                  }}
+                  data-dot={updateDot ? "on" : "off"}
+                  disabled={checkingUpdate || progress !== null}
+                  onClick={() => void checkUpdates()}
                 >
-                  {checkingSelfUpdate ? "检查中…" : "检查更新"}
+                  {checkingUpdate ? "检查中…" : "检查更新"}
                 </button>
               </>
             ) : null}
             <WindowControls theme={theme} onToggleTheme={toggleTheme} />
           </header>
 
-          <main className="page">
+          <main className="page" ref={pageRef}>
             {page === "home" ? (
-              <div className="body">
-                <div className="column">
-                  <section className="card hero">
-                    <div className="power">
-                      {running ? (
-                        <button className="power-btn" data-kind="stop" onClick={stopGame} disabled={working}>
-                          停止游戏
-                        </button>
-                      ) : (
-                        <button
-                          className="power-btn"
-                          onClick={startGame}
-                          disabled={busy || !canStart}
-                          title={canStart ? "" : (readiness?.detail ?? "")}
-                        >
-                          {status.phase === "starting"
-                            ? "正在启动…"
-                            : status.phase === "stopping"
-                              ? "正在停止…"
-                              : "开始游戏"}
-                        </button>
-                      )}
-                      <div className="power-side">
-                        <div className="power-state">{PHASE_LABEL[status.phase]}</div>
-                        {status.detail !== PHASE_LABEL[status.phase] ? (
-                          <div className="power-detail">{status.detail}</div>
-                        ) : null}
-                        {/* 启动方式挪进设置页了，这里留一行回声：按下之前就得知道会起什么。 */}
-                        <div className="power-detail">
-                          {launchMode === "server-only"
-                            ? "本次：仅服务端（不拉起 DFO.exe，设置页可改）"
-                            : "本次：原生启动（网关 + 客户端，设置页可改）"}
-                        </div>
-                        {busy ? (
-                          <div className="row">
-                            <button className="btn" data-tone="danger" onClick={stopGame} disabled={working}>
-                              取消并停止
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="checklist">
-                      <span className="check" data-level={readiness?.server_ready ? "ok" : "error"}>
-                        <b>服务端编排</b>
-                        <em>{readiness?.server_ready ? "已就绪" : (readiness?.server_detail ?? "…")}</em>
-                      </span>
-                      <span className="check" data-level={readiness?.client_ready ? "ok" : "error"}>
-                        <b>游戏客户端</b>
-                        <em>{readiness?.client_ready ? "已找到" : "未找到"}</em>
-                      </span>
-                      <span
-                        className="check"
-                        data-level={readiness?.storage_ready ? "ok" : "warn"}
-                      >
-                        <b>存档</b>
-                        <em>{readiness?.storage_detail ?? "…"}</em>
-                      </span>
-                      <span
-                        className="check"
-                        data-level={
-                          readiness?.gateway_listening && !(running || busy) ? "error" : "ok"
-                        }
-                      >
-                        <b>网关端口</b>
-                        <em>
-                          {readiness?.gateway_listening
-                            ? running || busy
-                              ? "本会话已监听"
-                              : "已被监听"
-                            : "空闲"}
-                        </em>
-                      </span>
-                    </div>
-                  </section>
-                </div>
-
-                <div className="column">
-                  <ControlPanel
-                    config={config}
-                    readiness={readiness}
-                    busy={busy}
-                    onAccount={async (account) =>
-                      act("设置账号", async () => {
-                        await commands.setAccount(account);
-                        await loadConfig();
-                      })
-                    }
-                    onPickClient={() =>
-                      act("选择客户端目录", async () => {
-                        await commands.pickClientDir();
-                        await loadConfig();
-                      })
-                    }
-                    onDiscoverClient={() =>
-                      act("识别客户端", async () => {
-                        await commands.discoverClient();
-                        await loadConfig();
-                      })
-                    }
+              <div className="home-stage">
+                {/* 主页只剩背景、右下角那枚起停开关，与左下这张更新日志卡：状态与自检都收进顶栏和悬停提示里。 */}
+                <section className="card log-card" aria-label="更新日志">
+                  {/* 条目还没接：页签只管切「客户端」与「启动器」两块待填槽位，等谁来挂日志。 */}
+                  <div className="log-tabs" role="tablist" aria-label="更新日志">
+                    <button
+                      type="button"
+                      role="tab"
+                      id="log-tab-client"
+                      aria-selected={logTab === "client"}
+                      aria-controls="log-panel"
+                      onClick={() => setLogTab("client")}
+                    >
+                      客户端
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="log-tab-launcher"
+                      aria-selected={logTab === "launcher"}
+                      aria-controls="log-panel"
+                      onClick={() => setLogTab("launcher")}
+                    >
+                      启动器
+                    </button>
+                  </div>
+                  <div
+                    className="log-slot"
+                    role="tabpanel"
+                    id="log-panel"
+                    aria-labelledby={`log-tab-${logTab}`}
                   />
-                </div>
+                </section>
               </div>
             ) : page === "settings" ? (
               <SettingsPage
                 config={config}
+                readiness={readiness}
                 busy={busy}
                 launchMode={launchMode}
+                background={background}
+                scheme={scheme}
+                onScheme={setScheme}
+                glass={glass}
+                onGlass={setGlass}
                 onLaunchMode={setLaunchMode}
                 onAutoStop={setAutoStop}
                 onAutoReport={setAutoReport}
+                onPickClient={() =>
+                  act("选择客户端目录", async () => {
+                    await commands.pickClientDir();
+                    await loadConfig();
+                  })
+                }
+                onDiscoverClient={() =>
+                  act("识别客户端", async () => {
+                    await commands.discoverClient();
+                    await loadConfig();
+                  })
+                }
+                onPickBackground={async () => {
+                  setWorking(true);
+                  try {
+                    setBackground(await commands.backgroundPick());
+                  } catch (err) {
+                    flash(errText(err), "err");
+                  } finally {
+                    setWorking(false);
+                  }
+                }}
+                onClearBackground={async () => {
+                  setWorking(true);
+                  try {
+                    const next = await commands.backgroundClear();
+                    setBackground(next);
+                    flash(next.note);
+                  } catch (err) {
+                    flash(errText(err), "err");
+                  } finally {
+                    setWorking(false);
+                  }
+                }}
                 onNotice={flash}
               />
             ) : page === "tools" ? (
@@ -560,12 +606,33 @@ export default function App() {
           </main>
 
           <footer className="statusbar">
-            <span>整合包：{info?.root ?? "…"}</span>
+            <span title={info?.root ?? ""}>整合包：{info?.root ?? "…"}</span>
             <span className="spacer" />
-            <span>日志：{info?.log_dir ?? "…"}</span>
+            <span title={info?.log_dir ?? ""}>日志：{info?.log_dir ?? "…"}</span>
           </footer>
         </div>
       </div>
+
+      {page === "home" ? (
+        <LaunchDock
+          config={config}
+          phase={status.phase}
+          busy={busy}
+          canStart={canStart}
+          startHint={startHint}
+          update={armed}
+          progress={progress}
+          onAccount={async (account) =>
+            act("设置账号", async () => {
+              await commands.setAccount(account);
+              await loadConfig();
+            })
+          }
+          onStart={startGame}
+          onStop={stopGame}
+          onUpdate={() => void applyUpdate()}
+        />
+      ) : null}
 
       {sheet === "health" ? (
         <HealthSheet
@@ -597,88 +664,6 @@ export default function App() {
 
       {showConsent ? (
         <ReportConsentSheet onChoose={chooseConsent} onLater={() => setConsentDone(true)} />
-      ) : null}
-
-      {updatePrompt ? (
-        <div className="scrim">
-          <div className="sheet sheet--narrow" role="dialog" aria-modal="true">
-            <header className="sheet-head">
-              <h3>发现服务端新版本</h3>
-              <span className="spacer" />
-            </header>
-            <div className="sheet-body">
-              <p className="hint">
-                最新版本：<strong>{updatePrompt.latest_tag}</strong>
-                <br />
-                本机版本：{updatePrompt.current_tag ?? "未部署"}
-                <br />
-                包大小：{(updatePrompt.asset_size / 1048576).toFixed(1)} MB
-                <br />
-                更新会自动选最快镜像下载，保留存档。建议先停止游戏再更新。
-              </p>
-              <div className="row">
-                <button className="btn" onClick={() => setUpdatePrompt(null)}>
-                  稍后再说
-                </button>
-                <button
-                  className="btn"
-                  data-tone="accent"
-                  disabled={working || status.phase === "running"}
-                  onClick={() => void applyPromptedUpdate()}
-                  title={status.phase === "running" ? "请先停止游戏" : ""}
-                >
-                  立即更新
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {selfUpdatePrompt ? (
-        <div className="scrim">
-          <div className="sheet sheet--narrow" role="dialog" aria-modal="true">
-            <header className="sheet-head">
-              <h3>启动器有新版本</h3>
-              <span className="spacer" />
-            </header>
-            <div className="sheet-body">
-              <p className="hint">
-                当前版本：<strong>v{selfUpdatePrompt.current_version}</strong>
-                <br />
-                最新版本：<strong>v{selfUpdatePrompt.latest_version}</strong>
-                <br />
-                包大小：{(selfUpdatePrompt.asset_size / 1048576).toFixed(1)} MB
-                <br />
-                更新后启动器会自动重启。
-              </p>
-              <div className="row">
-                <button className="btn" onClick={() => setSelfUpdatePrompt(null)}>
-                  稍后再说
-                </button>
-                <button
-                  className="btn"
-                  data-tone="accent"
-                  onClick={async () => {
-                    const info = selfUpdatePrompt;
-                    setSelfUpdatePrompt(null);
-                    try {
-                      await commands.selfUpdateApply(info);
-                      // bat 脚本已启动，等它接管
-                      setTimeout(() => {
-                        void commands.quit("keep");
-                      }, 1500);
-                    } catch (err) {
-                      flash(`更新失败：${errText(err)}`, "err");
-                    }
-                  }}
-                >
-                  立即更新
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       ) : null}
 
       {notice ? (

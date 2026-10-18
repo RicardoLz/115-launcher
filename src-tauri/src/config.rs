@@ -261,6 +261,8 @@ pub struct Settings {
     pub auto_report: bool,
     /// 上传范围说明只弹一次。
     pub auto_report_prompted: bool,
+    /// 主页背景素材（壁纸图片或动态壁纸视频）的绝对路径；空串等于不用背景。
+    pub background: String,
 }
 
 pub fn settings(root: &Root) -> Settings {
@@ -308,6 +310,13 @@ pub fn settings(root: &Root) -> Settings {
             .and_then(|r| r.get("prompted"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        background: value
+            .get("ui")
+            .and_then(|u| u.get("background"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
     }
 }
 

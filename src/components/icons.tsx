@@ -44,6 +44,17 @@ export function ToolsIcon({ size = 20 }: IconProps) {
   );
 }
 
+/// GM 工具：魔法棒 + 两粒闪光。和「工具」的扳手、「开发者」的尖括号都不撞形。
+export function GmIcon({ size = 20 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <path d="M4.6 19.4 12.4 11.6" />
+      <path d="M17 3.6 18.2 5.8 20.4 7 18.2 8.2 17 10.4 15.8 8.2 13.6 7 15.8 5.8Z" />
+      <path d="M7.4 3.4 7.9 5.1 9.6 5.6 7.9 6.1 7.4 7.8 6.9 6.1 5.2 5.6 6.9 5.1Z" />
+    </svg>
+  );
+}
+
 export function SavesIcon({ size = 20 }: IconProps) {
   return (
     <svg {...svgProps(size)}>
@@ -161,6 +172,27 @@ export function GripIcon({ size = 14 }: IconProps) {
   return (
     <svg {...svgProps(size)}>
       <path d="M9 6.5h.01M9 12h.01M9 17.5h.01M15 6.5h.01M15 12h.01M15 17.5h.01" strokeWidth="2.4" />
+    </svg>
+  );
+}
+
+/// 垃圾桶：只在「这一步会少一份文件」的地方出现，配确认弹窗一起用。
+export function TrashIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <path d="M4.5 6.5h15M9.5 6.5V4.8A1.3 1.3 0 0 1 10.8 3.5h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" />
+      <path d="M6.3 6.5 7.2 19a1.6 1.6 0 0 0 1.6 1.5h6.4A1.6 1.6 0 0 0 16.8 19l.9-12.5" />
+      <path d="M10.3 10v6.6M13.7 10v6.6" />
+    </svg>
+  );
+}
+
+/// 账号胶囊上的头像：只画一个人形轮廓，配合胶囊本身表示「这是登录账号」。
+export function UserIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <circle cx="12" cy="8.4" r="3.6" />
+      <path d="M5.2 19.4c1.3-3.1 3.8-4.7 6.8-4.7s5.5 1.6 6.8 4.7" />
     </svg>
   );
 }

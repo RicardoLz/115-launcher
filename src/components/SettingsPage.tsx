@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { commands, errText, type ConfigView } from "../bridge";
+import {
+  commands,
+  errText,
+  type BackgroundState,
+  type ConfigView,
+  type Readiness,
+} from "../bridge";
+import { SCHEMES, type Glass, type Scheme } from "../theme";
 
 export type LaunchMode = "compat" | "server-only";
 
@@ -20,22 +27,49 @@ const NEVER = [
 
 export default function SettingsPage({
   config,
+  readiness,
   busy,
   launchMode,
+  background,
+  scheme,
+  onScheme,
+  glass,
+  onGlass,
   onLaunchMode,
   onAutoStop,
   onAutoReport,
+  onPickClient,
+  onDiscoverClient,
+  onPickBackground,
+  onClearBackground,
   onNotice,
 }: {
   config: ConfigView | null;
+  readiness: Readiness | null;
   busy: boolean;
   launchMode: LaunchMode;
+  background: BackgroundState | null;
+  scheme: Scheme;
+  onScheme: (scheme: Scheme) => void;
+  glass: Glass;
+  onGlass: (glass: Glass) => void;
   onLaunchMode: (mode: LaunchMode) => void;
   onAutoStop: (enabled: boolean) => Promise<void>;
   onAutoReport: (enabled: boolean) => Promise<void>;
+  onPickClient: () => Promise<void>;
+  onDiscoverClient: () => Promise<void>;
+  onPickBackground: () => Promise<void>;
+  onClearBackground: () => Promise<void>;
   onNotice: (text: string, tone?: "ok" | "err") => void;
 }) {
   const pending = config?.pending_reports ?? 0;
+  // 背景那枚 chip：没设=灰，记着但文件不在了=黄，正常=绿。
+  const bgTone =
+    background === null || background.path === ""
+      ? "idle"
+      : background.exists
+        ? "ok"
+        : "busy";
   // 悬停与聚焦共用一个开关：只认鼠标的话，键盘玩家永远看不到这份白名单。
   const [showScope, setShowScope] = useState(false);
 
@@ -93,9 +127,78 @@ export default function SettingsPage({
             </button>
           </div>
         </section>
+
+        <section className="card">
+          <h2>客户端与存档</h2>
+
+          <div className="field">
+            <label>游戏客户端目录</label>
+            <div className="path">{readiness?.client_dir ?? "…"}</div>
+            <div className="row">
+              <button className="btn" disabled={busy} onClick={onDiscoverClient}>
+                自动识别
+              </button>
+              <button className="btn" disabled={busy} onClick={onPickClient}>
+                手动选择…
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <label>存档</label>
+            <div className="path">{config?.storage_detail ?? "…"}</div>
+            <p className="hint">启动器只在缺配置时补一份 SQLite 档，绝不覆盖或预建库文件。</p>
+          </div>
+        </section>
       </div>
 
       <div className="column">
+        <section className="card">
+          <h2>配色方案</h2>
+
+          <div className="field">
+            <div className="scheme-grid" role="group" aria-label="配色方案">
+              {SCHEMES.map((item) => (
+                <button
+                  key={item.key}
+                  className="scheme"
+                  data-scheme={item.key}
+                  title={item.label}
+                  aria-label={item.label}
+                  aria-pressed={scheme === item.key}
+                  onClick={() => onScheme(item.key)}
+                >
+                  <span className="scheme-plate" />
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              当前是「{SCHEMES.find((item) => item.key === scheme)?.label ?? SCHEMES[0].label}」。
+              方案只管颜色，明暗另算：暗色改到底色与各处高亮，亮色让整扇窗口跟着偏色。
+              设了主页背景时，悬停那圈光改用壁纸取到的主题色，这里的方案只管其余部分。
+            </p>
+          </div>
+
+          <div className="field">
+            <button
+              className="switch"
+              data-on={glass === "on" ? "true" : "false"}
+              onClick={() => onGlass(glass === "on" ? "off" : "on")}
+            >
+              <span>
+                液态玻璃
+                <br />
+                <em className="hint">卡片、弹层与按钮改用透光磨砂材质：底板透下去一层模糊，边框高光跟着光标走</em>
+              </span>
+              <span className="switch-track" />
+            </button>
+            <p className="hint">
+              关＝原版（不透明面板，不吃合成开销）。材质要有东西可透才好看：没设主页背景时只剩模糊与边缘高光，
+              设了壁纸才看得到背景透过卡片糊成一层。
+            </p>
+          </div>
+        </section>
+
         <section className="card">
           <h2>自动上报</h2>
 
@@ -158,6 +261,38 @@ export default function SettingsPage({
               {config?.auto_report
                 ? "断网时报告留在本地队列，恢复后按原来那条的编号重发，不会重复计数。"
                 : "自动上报未开启：本机记下的故障都留在这台电脑上，随时可以打开开关后发出去。"}
+            </p>
+          </div>
+        </section>
+
+        <section className="card">
+          <h2>主页背景</h2>
+
+          <div className="field">
+            <div className="row">
+              <span className="chip" data-tone={bgTone}>
+                {background?.note ?? "…"}
+              </span>
+              <span className="spacer" />
+              <button className="btn" disabled={busy} onClick={onPickBackground}>
+                选择素材…
+              </button>
+              <button
+                className="btn"
+                data-tone="danger"
+                disabled={busy || background === null || background.path === ""}
+                onClick={onClearBackground}
+              >
+                清除
+              </button>
+            </div>
+            {background && background.path ? (
+              <div className="path">{background.path}</div>
+            ) : null}
+            <p className="hint">
+              图片支持 png / jpg / jpeg / webp / gif；视频支持 mp4 / webm / mov，在主页循环静音播放。
+              素材留在你自己选的位置，启动器不搬运、不复制，只把当前选中的那一个路径放行给渲染层，
+              换一个或清除后旧路径立刻收回。没有背景时主页走纯色主题。
             </p>
           </div>
         </section>

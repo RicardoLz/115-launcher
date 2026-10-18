@@ -1,6 +1,7 @@
 //! 启动器自身更新：检查 RicardoLz/115-launcher 的 Release，下载新 exe 替换自己。
 
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::report::curl_exe;
@@ -8,6 +9,12 @@ use crate::procutil;
 
 const REPO_API: &str = "https://api.github.com/repos/RicardoLz/115-launcher/releases/latest";
 const APP_EXE_NAME: &str = "dfo-launcher.exe";
+const UPDATE_DIR: &str = "115us-self-update";
+
+/// 新 exe 的落点。下载这一侧与界面进度监视认同一条路径，免得两处各拼各的。
+pub fn download_target() -> PathBuf {
+    std::env::temp_dir().join(UPDATE_DIR).join(APP_EXE_NAME)
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SelfUpdateCheck {
@@ -88,9 +95,9 @@ pub fn apply_self_update<F: Fn(&str)>(info: &SelfUpdateCheck, log: F) -> Result<
     let exe_path = std::env::current_exe().map_err(|e| format!("找不到当前 exe：{e}"))?;
     let root_dir = exe_path.parent().ok_or("exe 无父目录")?;
 
-    let tmp_dir = std::env::temp_dir().join("115us-self-update");
+    let tmp_dir = std::env::temp_dir().join(UPDATE_DIR);
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建临时目录失败：{e}"))?;
-    let new_exe = tmp_dir.join(APP_EXE_NAME);
+    let new_exe = download_target();
     if new_exe.is_file() {
         let _ = std::fs::remove_file(&new_exe);
     }
@@ -201,7 +208,7 @@ pub fn apply_self_update<F: Fn(&str)>(info: &SelfUpdateCheck, log: F) -> Result<
 }
 
 pub fn cleanup_self_update_cache() {
-    let dir = std::env::temp_dir().join("115us-self-update");
+    let dir = std::env::temp_dir().join(UPDATE_DIR);
     if dir.is_dir() {
         let _ = std::fs::remove_dir_all(&dir);
     }

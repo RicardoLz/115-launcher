@@ -393,11 +393,22 @@ export interface BackupItem {
   note: string;
   accounts: number;
   characters: number;
+  is_current: boolean;
 }
 
 export interface SavesState {
   save: SaveInfo;
   backups: BackupItem[];
+}
+
+/** 主页背景素材：kind 决定画 <img> 还是 <video>，exists 说素材文件还在不在。 */
+export interface BackgroundState {
+  path: string;
+  kind: "none" | "image" | "video";
+  exists: boolean;
+  note: string;
+  /** 壁纸主题色 `#rrggbb`；空串 = 取不到（没背景、视频、坏图、整张灰阶），样式退回各自兜底色。 */
+  accent: string;
 }
 
 /** 服务端更新检查结果。 */
@@ -417,6 +428,14 @@ export interface SelfUpdateCheck {
   asset_name: string;
   asset_size: number;
   download_url: string;
+}
+
+/** 一条下载的真实进度。phase=deploy 表示字节已经下完，正在解压部署 / 替换重启。 */
+export interface UpdateProgress {
+  kind: "self" | "server";
+  phase: "download" | "deploy";
+  percent: number;
+  text: string;
 }
 
 export const commands = {
@@ -441,6 +460,8 @@ export const commands = {
   setClientMod: (id: string, enabled: boolean) =>
     invoke<ActionRecord>("set_client_mod", { id, enabled }),
   importClientMod: () => invoke<ActionRecord>("import_client_mod"),
+  importServerMod: () => invoke<ActionRecord>("import_server_mod"),
+  openModkitDir: () => invoke<ActionRecord>("open_modkit_dir"),
   autofireGet: () => invoke<AutofireView>("autofire_get"),
   autofireLive: () => invoke<AutofireLive>("autofire_live"),
   autofireSetMaster: (on: boolean) => invoke<AutofireLive>("autofire_set_master", { on }),
@@ -450,6 +471,10 @@ export const commands = {
   savesState: () => invoke<SavesState>("saves_state"),
   savesBackup: () => invoke<ActionRecord>("saves_backup"),
   savesRestore: (path: string) => invoke<ActionRecord>("saves_restore", { path }),
+  savesDelete: (path: string) => invoke<ActionRecord>("saves_delete", { path }),
+  backgroundState: () => invoke<BackgroundState>("background_state"),
+  backgroundPick: () => invoke<BackgroundState>("background_pick"),
+  backgroundClear: () => invoke<BackgroundState>("background_clear"),
   reportsRetry: () => invoke<void>("reports_retry"),
   feedbackMeta: () => invoke<FeedbackMeta>("feedback_meta"),
   feedbackBoard: (query: BoardQuery) =>
@@ -498,6 +523,8 @@ export const events = {
     listen("first-run-no-server", () => handler()),
   onServerUpdateAvailable: (handler: (info: ServerUpdateCheck) => void) =>
     listen<ServerUpdateCheck>("server-update-available", (e) => handler(e.payload)),
+  onUpdateProgress: (handler: (progress: UpdateProgress) => void) =>
+    listen<UpdateProgress>("update-progress", (e) => handler(e.payload)),
 };
 
 export const PHASE_LABEL: Record<Phase, string> = {

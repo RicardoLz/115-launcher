@@ -2,12 +2,17 @@
 //! 但去掉了那层 `rpc.result` 往返 —— Tauri 的 command 本身就是异步的。
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
 use crate::autofire::{self, Engine as AutofireEngine};
+use crate::background;
 use crate::config::{self, valid_account};
 use crate::health;
 use crate::logbus::Line;
@@ -401,6 +406,35 @@ pub async fn import_client_mod(
     Ok(ActionRecord { message })
 }
 
+/// 导入一个服务端 mod 目录：选目录 → 按内容分流（.lua 平铺进脚本目录 + 整个目录落一份）。
+#[tauri::command]
+pub async fn import_server_mod(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<ActionRecord, String> {
+    let picked = block(move || app.dialog().file().blocking_pick_folder()).await?;
+    let session = state.session.clone();
+    let Some(raw) = picked else {
+        return Err("已取消选择".to_string());
+    };
+    let path = match raw {
+        FilePath::Path(path) => path,
+        FilePath::Url(url) => return Err(format!("只能选本地目录，收到的是：{url}")),
+    };
+    let root = session.root();
+    let message = join(move || mods::import_server_mod(&root, &path)).await?;
+    session.bus().info(message.clone());
+    Ok(ActionRecord { message })
+}
+
+/// 在资源管理器里打开 modkit 的落点那一层（路径由 Rust 侧算，界面不传路径）。
+#[tauri::command]
+pub async fn open_modkit_dir(state: tauri::State<'_, AppState>) -> Result<ActionRecord, String> {
+    let root = state.root.clone();
+    let message = join(move || mods::open_modkit_dir(&root)).await?;
+    Ok(ActionRecord { message })
+}
+
 /// 自动上报开关。开启前界面必须先展示一次上传范围说明（`prompted` 一并落盘）。
 #[tauri::command]
 pub async fn set_auto_report(
@@ -733,6 +767,154 @@ pub async fn saves_restore(
     .await
 }
 
+/// 删除一份备份：只删 `backup/` 底下玩家点名的那一份，当前档与越界路径在 Rust 侧就拒掉。
+/// 服务端在跑也不拦 —— 这一步够不到正在用的库。
+#[tauri::command]
+pub async fn saves_delete(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<ActionRecord, String> {
+    let session = state.session.clone();
+    let root = state.root.clone();
+    join(move || {
+        let message = saves::delete_backup(&root, &path)?;
+        session.bus().warn(message.clone());
+        Ok(ActionRecord { message })
+    })
+    .await
+}
+
+// ---------------------------------------------------------------- 背景接口
+
+/// 主页背景状态：路径、类型（`none` / `image` / `video`）、素材文件是否还在场。
+///
+/// 这里顺手把白名单也确认一遍：界面拿到的地址和它的放行是同一次往返里备好的，
+/// 开机那一场就不必赌 `setup` 里的放行有没有赶在界面发起请求之前。
+#[tauri::command]
+pub async fn background_state(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<background::BackgroundState, String> {
+    let session = state.session.clone();
+    let root = state.root.clone();
+    // 先放行再取地址：界面拿到地址的同一刻，白名单里一定有它。
+    if let Err(err) = background::apply_scope(&app, &root) {
+        session.bus().warn(err);
+    }
+    let after = block(move || background::state(&root)).await?;
+    Ok(after)
+}
+
+/// 选一张壁纸或一段动态壁纸：验完才写设置，另把 asset 白名单收成只放行这一个文件。
+/// 取消选择等于什么都没发生，原样返回当前状态。
+#[tauri::command]
+pub async fn background_pick(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<background::BackgroundState, String> {
+    let picker = app.clone();
+    let picked = block(move || {
+        picker
+            .dialog()
+            .file()
+            .add_filter(
+                "背景素材（壁纸图片或动态壁纸视频）",
+                &["png", "jpg", "jpeg", "webp", "gif", "mp4", "webm", "mov"],
+            )
+            .blocking_pick_file()
+    })
+    .await?;
+    let session = state.session.clone();
+    let root = state.root.clone();
+    let Some(raw) = picked else {
+        return Ok(background::state(&root));
+    };
+    let chosen = match raw {
+        FilePath::Path(path) => path,
+        FilePath::Url(url) => return Err(format!("只能选本地文件，收到的是：{url}")),
+    };
+    let install_root = root.clone();
+    let after = join(move || background::install(&install_root, &chosen)).await?;
+    // 放行失败就等于背景播不出来，不能装作选好了：把设置已记下这件事说清楚。
+    if let Err(err) = background::apply_scope(&app, &root) {
+        return Err(format!("{err}（路径已经记下：{}）", after.path));
+    }
+    session.bus().info(format!("背景已设为 {}", after.note));
+    Ok(after)
+}
+
+/// 清除背景：只删设置里那一行，素材文件与已放行的白名单都不碰。
+#[tauri::command]
+pub async fn background_clear(
+    state: tauri::State<'_, AppState>,
+) -> Result<background::BackgroundState, String> {
+    let session = state.session.clone();
+    let clear_root = state.root.clone();
+    let after = join(move || background::clear(&clear_root)).await?;
+    session.bus().info("已清除主页背景，退回纯色主题");
+    Ok(after)
+}
+
+// ---------------------------------------------------------------- 更新进度
+
+/// 一条下载的真实进度。curl 自己不出百分比，这里按已落盘字节数对 Release 声明的大小算，
+/// 界面拿 percent 画那一圈边缘环，拿 phase 决定文案写「更新中」还是「部署中」。
+#[derive(Serialize)]
+struct UpdateProgress {
+    kind: &'static str,
+    phase: &'static str,
+    percent: u8,
+    text: String,
+}
+
+/// 下载期间每隔一会儿读一次文件大小往界面发事件。离开作用域即停线程，调用方绑一个 `_watch` 就够。
+struct ProgressWatch {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl ProgressWatch {
+    fn start(app: AppHandle, kind: &'static str, file: PathBuf, total: u64) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let thread = std::thread::spawn(move || {
+            let mut last = u8::MAX;
+            while !flag.load(Ordering::Relaxed) {
+                let got = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+                let percent = if total == 0 {
+                    0
+                } else {
+                    (got.saturating_mul(100) / total).min(100) as u8
+                };
+                if percent != last {
+                    last = percent;
+                    let payload = UpdateProgress {
+                        kind,
+                        phase: if percent >= 100 { "deploy" } else { "download" },
+                        percent,
+                        text: format!("{} MB / {} MB", got / 1_048_576, total / 1_048_576),
+                    };
+                    let _ = app.emit("update-progress", &payload);
+                }
+                std::thread::sleep(Duration::from_millis(400));
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for ProgressWatch {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 // ---------------------------------------------------------------- 服务端更新
 
 /// 查询 GitHub 最新 Release，对比本地已部署版本。
@@ -747,22 +929,27 @@ pub async fn server_update_check(
 /// 检查并下载安装最新服务端。已是最新则不下载。
 #[tauri::command]
 pub async fn server_update_apply(
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<ActionRecord, String> {
     let session = state.session.clone();
     let root = state.root.clone();
     let bus = session.bus().clone();
-    join(move || {
-        let info = updater::check(&root)?;
-        if !info.has_update {
-            return Ok(ActionRecord {
-                message: format!("已是最新（{}）", info.latest_tag),
-            });
-        }
-        let message = updater::apply(&root, &info, &bus)?;
-        Ok(ActionRecord { message })
-    })
-    .await
+    // 先拿到资产名与大小，才知道该盯哪个文件、按多少字节算百分比。
+    let early = root.clone();
+    let info = join(move || updater::check(&early)).await?;
+    if !info.has_update {
+        return Ok(ActionRecord {
+            message: format!("已是最新（{}）", info.latest_tag),
+        });
+    }
+    let _watch = ProgressWatch::start(
+        app,
+        "server",
+        updater::zip_target(&info.asset_name),
+        info.asset_size,
+    );
+    join(move || updater::apply(&root, &info, &bus).map(|message| ActionRecord { message })).await
 }
 
 #[tauri::command]
@@ -786,8 +973,18 @@ pub async fn self_update_check(state: tauri::State<'_, AppState>) -> Result<self
 }
 
 #[tauri::command]
-pub async fn self_update_apply(state: tauri::State<'_, AppState>, info: self_updater::SelfUpdateCheck) -> Result<ActionRecord, String> {
+pub async fn self_update_apply(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    info: self_updater::SelfUpdateCheck,
+) -> Result<ActionRecord, String> {
     let bus = state.session.bus().clone();
+    let _watch = ProgressWatch::start(
+        app,
+        "self",
+        self_updater::download_target(),
+        info.asset_size,
+    );
     join(move || {
         bus.info(format!("[自更新] 开始下载 v{}…", info.latest_version));
         let bus2 = bus.clone();

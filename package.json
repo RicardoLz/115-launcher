@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "sandbox": "vite --config vite.sandbox.config.ts",
+    "check:sandbox": "tsc -p tsconfig.sandbox.json --noEmit",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"

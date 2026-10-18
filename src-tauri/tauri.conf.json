@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "DFO-115US 单机启动器",
-        "width": 1180,
-        "height": 780,
-        "minWidth": 920,
-        "minHeight": 600,
+        "width": 1280,
+        "height": 720,
+        "minWidth": 960,
+        "minHeight": 540,
         "center": true,
         "resizable": true,
         "visible": true,
@@ -50,10 +50,41 @@
         "visible": false,
         "decorations": false,
         "shadow": true
+      },
+      {
+        "label": "panel-mods",
+        "title": "客户端插件",
+        "width": 560,
+        "height": 560,
+        "minWidth": 360,
+        "minHeight": 260,
+        "x": 260,
+        "y": 240,
+        "resizable": true,
+        "visible": false,
+        "decorations": false,
+        "shadow": true
+      },
+      {
+        "label": "panel-modkit",
+        "title": "mod 安装层",
+        "width": 520,
+        "height": 380,
+        "minWidth": 360,
+        "minHeight": 220,
+        "x": 320,
+        "y": 300,
+        "resizable": true,
+        "visible": false,
+        "decorations": false,
+        "shadow": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true
+      }
     }
   },
   "bundle": {
