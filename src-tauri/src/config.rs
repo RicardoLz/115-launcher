@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::paths::{self, has_client_files, Root};
@@ -170,6 +171,104 @@ pub fn ensure_launcher_local_json(root: &Root) -> Result<(), String> {
         write_json(&root.launcher_local_json(), &value, 2)?;
     }
     Ok(())
+}
+
+// ------------------------------------------------------------ 服务端内存三键
+
+/// Go 侧把 MiB 左移 20 位换成字节，超过这个值就溢不出来，`memoryBytesFromMiB` 会直接拒绝。
+pub const MAX_MEMORY_MIB: u64 = u64::MAX >> 20;
+/// 编排器对 `import_max_procs` 的硬门：超过它（`1<<16`）就拒绝启动网关，所以界面得先挡。
+pub const MAX_IMPORT_PROCS: u64 = 65536;
+
+/// 三项都是「不写 = 不限」，所以一律用 `Option`；读到的 0 也归一成 `None`，
+/// 界面上两者都显示「不限」，写回时干脆不写这个键。
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MemoryTuning {
+    pub server_memory_limit_mib: Option<u64>,
+    pub go_mem_target_mib: Option<u64>,
+    pub import_max_procs: Option<u64>,
+}
+
+fn positive_u64(value: &Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(Value::as_u64).filter(|n| *n > 0)
+}
+
+pub fn memory_tuning(root: &Root) -> MemoryTuning {
+    let value = read_json(&root.launcher_local_json());
+    MemoryTuning {
+        server_memory_limit_mib: positive_u64(&value, "server_memory_limit_mib"),
+        go_mem_target_mib: positive_u64(&value, "go_mem_target_mib"),
+        import_max_procs: positive_u64(&value, "import_max_procs"),
+    }
+}
+
+/// 只动那三个键，其余键（`client_dir`、`server_binary`、将来别人加的）整份留着。
+/// 与 `set_client_dir` 不同，这里**拒绝**在文件读不通时凭空写一份：那份文件同时归 Go 编排器读，
+/// 把它重写成只剩三个内存键等于把玩家的客户端目录和服务端二进制一起抹掉。
+pub fn set_memory_tuning(root: &Root, tuning: &MemoryTuning) -> Result<MemoryTuning, String> {
+    let clean = MemoryTuning {
+        server_memory_limit_mib: check_mib(tuning.server_memory_limit_mib, "server_memory_limit_mib")?,
+        go_mem_target_mib: check_mib(tuning.go_mem_target_mib, "go_mem_target_mib")?,
+        import_max_procs: match tuning.import_max_procs.filter(|n| *n > 0) {
+            Some(n) if n > MAX_IMPORT_PROCS => {
+                return Err(format!(
+                    "导入并发最大 {MAX_IMPORT_PROCS}（编排器超过它就拒绝启动），现在是 {n}"
+                ))
+            }
+            other => other,
+        },
+    };
+
+    let path = root.launcher_local_json();
+    let mut value = read_launcher_object(&path)?;
+    let object = value.as_object_mut().expect("read_launcher_object 已保证是对象");
+    for (key, wanted) in [
+        ("server_memory_limit_mib", clean.server_memory_limit_mib),
+        ("go_mem_target_mib", clean.go_mem_target_mib),
+        ("import_max_procs", clean.import_max_procs),
+    ] {
+        match wanted {
+            Some(n) => {
+                object.insert(key.to_string(), Value::from(n));
+            }
+            None => {
+                object.remove(key);
+            }
+        }
+    }
+    write_json(&path, &value, 2)?;
+    Ok(clean)
+}
+
+fn check_mib(value: Option<u64>, key: &str) -> Result<Option<u64>, String> {
+    match value.filter(|n| *n > 0) {
+        Some(n) if n > MAX_MEMORY_MIB => Err(format!(
+            "{key} 超出可换算范围（最大 {MAX_MEMORY_MIB} MiB），编排器会拒绝启动"
+        )),
+        other => Ok(other),
+    }
+}
+
+/// 严格版读取：文件在就必须解析得开。缺席才算空对象。
+fn read_launcher_object(path: &Path) -> Result<Value, String> {
+    if !path.exists() {
+        return Ok(Value::Object(Map::new()));
+    }
+    let raw = std::fs::read(path).map_err(|err| format!("读取 {} 失败：{err}", path.display()))?;
+    let trimmed = raw.strip_prefix(&[0xEF, 0xBB, 0xBF][..]).unwrap_or(&raw);
+    let value: Value = serde_json::from_slice(trimmed).map_err(|err| {
+        format!(
+            "{} 读不通（{err}）—— 启动器不会覆盖它，请先手工修好；Go 编排器同样读不了这份",
+            path.display()
+        )
+    })?;
+    if !value.is_object() {
+        return Err(format!(
+            "{} 顶层不是 JSON 对象，启动器不会覆盖它",
+            path.display()
+        ));
+    }
+    Ok(value)
 }
 
 // ---------------------------------------------------------------- 存档路由
@@ -415,6 +514,141 @@ mod tests {
             );
             assert_eq!(client_dir(&root), want);
         }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn temp_root(label: &str) -> (Root, PathBuf) {
+        let base = std::env::temp_dir().join(format!(
+            "dfo-memory-test-{}-{}",
+            std::process::id(),
+            label
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("server")).expect("造 server");
+        (
+            Root {
+                path: base.clone(),
+                source: "test",
+            },
+            base,
+        )
+    }
+
+    /// 任务书红线：写回必须 JSON 往返保留未知键，且必须无 BOM（Go 的 `json.Unmarshal` 拒 BOM）。
+    /// 顺手验「不限」= 键干脆不写，而不是写 0。
+    #[test]
+    fn memory_tuning_round_trips_and_writes_no_bom() {
+        let (root, base) = temp_root("roundtrip");
+        let local = root.launcher_local_json();
+        std::fs::write(
+            &local,
+            "\u{feff}{\"client_dir\":\"../client\",\"server_binary\":\"work/dfo-lan/bin/x.exe\",\"channel_identity\":false,\"future_key\":{\"a\":1}}",
+        )
+        .expect("写 launcher.local.json");
+
+        set_memory_tuning(
+            &root,
+            &MemoryTuning {
+                server_memory_limit_mib: Some(4096),
+                go_mem_target_mib: Some(1536),
+                import_max_procs: Some(4),
+            },
+        )
+        .expect("写入该成功");
+
+        let raw = std::fs::read(&local).expect("读回");
+        assert!(!raw.starts_with(&[0xEF, 0xBB, 0xBF]), "必须无 BOM");
+        assert!(raw.starts_with(b"{"), "首个字节就该是 JSON");
+        let text = String::from_utf8(raw).expect("UTF-8");
+        for keep in ["client_dir", "server_binary", "channel_identity", "future_key"] {
+            assert!(text.contains(keep), "{keep} 不该被丢掉");
+        }
+        assert_eq!(
+            memory_tuning(&root),
+            MemoryTuning {
+                server_memory_limit_mib: Some(4096),
+                go_mem_target_mib: Some(1536),
+                import_max_procs: Some(4),
+            }
+        );
+
+        // 全填 0 = 全部不限：三个键从文件里消失，别人的键一个不少。
+        set_memory_tuning(&root, &MemoryTuning::default()).expect("清空该成功");
+        let text = std::fs::read_to_string(&local).expect("读回");
+        for key in ["server_memory_limit_mib", "go_mem_target_mib", "import_max_procs"] {
+            assert!(!text.contains(key), "{key} 该被删掉而不是留个 0");
+        }
+        for keep in ["client_dir", "server_binary", "channel_identity", "future_key"] {
+            assert!(text.contains(keep), "{keep} 不该被丢掉");
+        }
+        assert_eq!(memory_tuning(&root), MemoryTuning::default());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 界面前置校验要报的是编排器自己那句话的口径，别让玩家写出一份启动不来的配置。
+    #[test]
+    fn memory_tuning_refuses_what_the_orchestrator_would_refuse() {
+        let (root, base) = temp_root("reject");
+        let local = root.launcher_local_json();
+        std::fs::write(&local, r#"{"client_dir":"../client"}"#).expect("写 launcher.local.json");
+        let before = std::fs::read(&local).expect("读回");
+
+        let too_many = MemoryTuning {
+            server_memory_limit_mib: None,
+            go_mem_target_mib: None,
+            import_max_procs: Some(MAX_IMPORT_PROCS + 1),
+        };
+        let err = set_memory_tuning(&root, &too_many).expect_err("65536 以上该拒");
+        assert!(err.contains("65536"), "{err}");
+
+        let too_big = MemoryTuning {
+            server_memory_limit_mib: Some(MAX_MEMORY_MIB + 1),
+            go_mem_target_mib: None,
+            import_max_procs: None,
+        };
+        let err = set_memory_tuning(&root, &too_big).expect_err("换算溢出该拒");
+        assert!(err.contains("server_memory_limit_mib"), "{err}");
+
+        // 边界本身要放行：正好 65536 是 Go 允许的上限。
+        set_memory_tuning(
+            &root,
+            &MemoryTuning {
+                server_memory_limit_mib: None,
+                go_mem_target_mib: None,
+                import_max_procs: Some(MAX_IMPORT_PROCS),
+            },
+        )
+        .expect("正好 65536 该放行");
+        assert_eq!(memory_tuning(&root).import_max_procs, Some(MAX_IMPORT_PROCS));
+
+        // 被拒的那两次没动过文件。
+        std::fs::write(&local, &before).expect("复原以比对");
+        let err = set_memory_tuning(&root, &too_many).expect_err("仍然该拒");
+        assert!(err.contains("65536"), "{err}");
+        assert_eq!(std::fs::read(&local).expect("读回"), before, "拒绝时不许落盘");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 这份文件同时归 Go 读。它读不通时只能报出来，绝不能顺手写一份「干净」的覆盖玩家配置。
+    #[test]
+    fn memory_tuning_never_clobbers_an_unreadable_launcher_local_json() {
+        let (root, base) = temp_root("clobber");
+        let local = root.launcher_local_json();
+        std::fs::write(&local, b"{\n  \"client_dir\": ").expect("写半份 JSON");
+        let err = set_memory_tuning(
+            &root,
+            &MemoryTuning {
+                server_memory_limit_mib: Some(1024),
+                go_mem_target_mib: None,
+                import_max_procs: None,
+            },
+        )
+        .expect_err("坏文件该报错");
+        assert!(err.contains("不会覆盖"), "{err}");
+        assert_eq!(std::fs::read(&local).expect("读回"), b"{\n  \"client_dir\": ");
+        // 文件缺席时另当别论：那是首次部署，写一份是安全的。
+        std::fs::remove_file(&local).expect("删掉");
+        assert_eq!(memory_tuning(&root), MemoryTuning::default());
         let _ = std::fs::remove_dir_all(&base);
     }
 }

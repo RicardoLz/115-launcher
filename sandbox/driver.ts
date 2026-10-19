@@ -21,6 +21,19 @@ export type Step =
   | { do: "wheel"; delta: number }
   /** 合成一次拖拽：按住 dy 像素再松手，松手前那几段速度会被换算成甩出。 */
   | { do: "drag"; dy: number }
+  /** 往「服务端内存」卡第 at 格写值（走原生 value setter + input 事件，React 才认这是玩家敲的）。 */
+  | { do: "fill"; at: number; value: string }
+  /** 断言内存卡渲染出来的东西：三格的值、拦下的错误、某个读数、尺那一档、小曲线点数区间、提醒句包含。 */
+  | {
+      do: "mem";
+      inputs?: string[];
+      errs?: string[];
+      hasStat?: string;
+      track?: string | null;
+      points?: [number, number];
+      warn?: string;
+      timeout?: number;
+    }
   | { do: "shot"; label: string };
 
 export interface Case {
@@ -99,6 +112,11 @@ function slim(snap: Snapshot) {
     // 配色方案这一组：scheme 是根节点属性，hue 是它带出来的 --hue，派生色全靠这一个数。
     scheme: snap.scheme,
     hue: snap.accent.hue,
+    // 内存卡：三格输入值 | 六个读数 | 尺那一档（宽%|档名）| 小曲线点数 | 提醒句。null = 这一页没这张卡。
+    mem:
+      snap.memory === null
+        ? null
+        : `${snap.memory.inputs.join("/")} | ${snap.memory.stats.join("/")} | 尺 ${snap.memory.track ?? "不画"} | ${snap.memory.points} 点${snap.memory.warn === "" ? "" : ` | ${snap.memory.warn}`}`,
   };
 }
 
@@ -201,6 +219,32 @@ export async function play(item: Case): Promise<Trace[]> {
         }
         box.dispatchEvent(new PointerEvent("pointerup", at(step.dy)));
         await tick();
+      } else if (step.do === "fill") {
+        const nodes = Array.from(document.querySelectorAll<HTMLInputElement>(".mem-card .num input"));
+        const node = nodes[step.at];
+        if (node === undefined) throw `内存卡没有第 ${step.at + 1} 格输入`;
+        // 受控组件只能走原生 setter + input 事件：直接写 node.value 会被 React 当作没变。
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        if (setter === undefined) throw "取不到 input 的 value setter";
+        setter.call(node, step.value);
+        node.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+      } else if (step.do === "mem") {
+        await waitUntil(
+          () => {
+            const m = snapshot().memory;
+            if (m === null) return false;
+            if (step.inputs !== undefined && m.inputs.join("|") !== step.inputs.join("|")) return false;
+            if (step.errs !== undefined && m.errs.join("|") !== step.errs.join("|")) return false;
+            if (step.hasStat !== undefined && !m.stats.some((x) => x.includes(step.hasStat ?? ""))) return false;
+            if (step.track !== undefined && m.track !== step.track) return false;
+            if (step.points !== undefined && (m.points < step.points[0] || m.points > step.points[1])) return false;
+            if (step.warn !== undefined && !m.warn.includes(step.warn)) return false;
+            return true;
+          },
+          `内存卡 ${JSON.stringify(step)}`,
+          step.timeout ?? 6000,
+        );
       } else if (step.do === "ms") {
         const end = performance.now() + step.value;
         while (performance.now() < end) await mac();

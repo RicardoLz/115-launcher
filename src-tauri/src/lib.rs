@@ -9,6 +9,7 @@ mod commands;
 mod config;
 mod health;
 mod logbus;
+mod memory;
 mod mods;
 mod panels;
 mod paths;
@@ -129,6 +130,9 @@ pub fn run() {
             commands::feedback_submit,
             commands::pick_client_dir,
             commands::discover_client,
+            commands::memory_config,
+            commands::memory_save,
+            commands::memory_live,
             commands::server_update_check,
             commands::server_update_apply,
             commands::self_update_check,

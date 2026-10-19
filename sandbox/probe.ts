@@ -53,6 +53,15 @@ export interface Snapshot {
   entry: string[];
   /** 根节点上的 data-scheme；空串 = 还没写过，等于默认那套琥珀。 */
   scheme: string;
+  /** 「服务端内存」卡：三格输入值、就地拦下的错误、六个读数、尺宽%、小曲线点数、提醒句；null = 卡不在这一页。 */
+  memory: {
+    inputs: string[];
+    errs: string[];
+    stats: string[];
+    track: string | null;
+    points: number;
+    warn: string;
+  } | null;
   animations: { name: string; state: string; time: number | null }[];
   overflowing: string[];
   ellipsised: string[];
@@ -169,6 +178,9 @@ export function snapshot(): Snapshot {
   const pill = pick(".account-pill");
   const name = pick(".account-pill__name");
   const toast = pick(".toast");
+  const memCard = pick(".mem-card");
+  const memTrack = memCard?.querySelector<HTMLElement>(".mem-track i") ?? null;
+  const memSpark = memCard?.querySelector("polyline") ?? null;
   const bgImg = document.querySelector(".bg-layer img");
   const bgVideo = document.querySelector(".bg-layer video");
   const bgNode = (bgImg ?? bgVideo) as HTMLImageElement | HTMLVideoElement | null;
@@ -280,6 +292,18 @@ export function snapshot(): Snapshot {
             .getAnimations()
             .map((item) => (item as Animation & { animationName?: string }).animationName ?? item.constructor.name),
     scheme: document.documentElement.dataset.scheme ?? "",
+    memory: memCard
+      ? {
+          inputs: Array.from(memCard.querySelectorAll<HTMLInputElement>(".num input")).map((node) => node.value),
+          errs: Array.from(memCard.querySelectorAll<HTMLElement>(".mem-row .hint[data-tone='err']")).map(
+            (node) => node.textContent?.trim() ?? "",
+          ),
+          stats: Array.from(memCard.querySelectorAll<HTMLElement>(".mem-stats dd")).map((node) => node.textContent?.trim() ?? ""),
+          track: memTrack ? `${memTrack.style.width ?? ""}|${memTrack.dataset.tone ?? ""}` : null,
+          points: (memSpark?.getAttribute("points") ?? "").trim().split(/\s+/).filter((x) => x !== "").length,
+          warn: memCard.querySelector<HTMLElement>(".mem-warn")?.textContent?.trim() ?? "",
+        }
+      : null,
     animations: freezeAnimations(),
     overflowing,
     ellipsised,

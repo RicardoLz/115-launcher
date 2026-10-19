@@ -19,6 +19,9 @@ import type {
   Issue,
   LogLine,
   Mine,
+  MemoryConfig,
+  MemoryLive,
+  MemoryTuning,
   ModsState,
   Phase,
   PortReport,
@@ -52,6 +55,8 @@ export interface SimState {
   pending_reports: number;
   storage_detail: string;
   background: BackgroundState;
+  mem_tuning: MemoryTuning;
+  mem_live: MemoryLive | null;
   self_latest: string | null;
   server_latest: string | null;
   server_tag: string | null;
@@ -90,6 +95,8 @@ export function initialState(): SimState {
     pending_reports: 0,
     storage_detail: "sqlite：runtime/storage/local.sqlite3",
     background: { path: "", kind: "none", exists: false, note: "没设置背景素材", accent: "" },
+    mem_tuning: { server_memory_limit_mib: null, go_mem_target_mib: null, import_max_procs: null },
+    mem_live: null,
     self_latest: null,
     server_latest: null,
     server_tag: "v20261014-1",
@@ -111,6 +118,31 @@ export const st: SimState = initialState();
 
 export function reset(): void {
   Object.assign(st, initialState());
+}
+
+/// 实机那一场的 MEMORY_GUARD 采样替身：私有提交一路涨到 1.4 GiB 上下，
+/// 数字照 runtime/roles_persist_20261019-040032_115us_r2_next01 那一场抄。
+export function memLive(patch: Partial<MemoryLive> = {}): MemoryLive {
+  const series = Array.from({ length: 40 }, (_, i) => 520 + Math.round(i * 23) + (i % 5) * 11);
+  return {
+    session: "roles_persist_20261019-040032_115us_r2_next01",
+    path: "X:\\DFO-115US\\server\\work\\dfo-lan\\runtime\\roles_persist_20261019-040032_115us_r2_next01\\gateway.err",
+    pid: 24064,
+    policy: "local-stability-20261008-r2",
+    hard_limit_mib: 4096,
+    low_memory_mib: 1024,
+    seconds: 422.3,
+    private_mib: 1431,
+    working_mib: 1180,
+    system_available_mib: 12984,
+    peak_private_mib: null,
+    ended: false,
+    stale: false,
+    samples: 7822,
+    series,
+    note: "",
+    ...patch,
+  };
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
@@ -484,6 +516,34 @@ const handlers: Record<string, Handler> = {
   },
   discover_client(): ActionRecord {
     return { message: "识别到 DFO.exe" };
+  },
+  memory_config(): MemoryConfig {
+    return {
+      tuning: { ...st.mem_tuning },
+      path: `${st.root}\\launcher.local.json`,
+      max_memory_mib: 17592186044415,
+      max_import_procs: 65536,
+      cpu_count: 16,
+    };
+  },
+  memory_save(args): ActionRecord {
+    const tuning = (args.tuning ?? {}) as MemoryTuning;
+    // 与 Rust 侧同一道门：编排器超过 65536 就直接拒绝启动，界面不能先把脏值写进文件。
+    if ((tuning.import_max_procs ?? 0) > 65536) {
+      throw `导入并发最大 65536（编排器超过它就拒绝启动），现在是 ${tuning.import_max_procs}`;
+    }
+    st.mem_tuning = { ...tuning };
+    const mib = (value: number | null) => (value === null ? "不限" : `${value} MiB`);
+    const message =
+      `服务端内存设置已写入（${st.root}\\launcher.local.json）：` +
+      `提交内存硬上限 ${mib(tuning.server_memory_limit_mib)}，` +
+      `Go 内存目标 ${mib(tuning.go_mem_target_mib)}，` +
+      `导入并发 ${tuning.import_max_procs ?? "默认"}；下次「开始游戏」才生效`;
+    note(message);
+    return { message };
+  },
+  memory_live(): MemoryLive | null {
+    return st.mem_live;
   },
   server_update_check(): ServerUpdateCheck {
     const info = serverCheck();

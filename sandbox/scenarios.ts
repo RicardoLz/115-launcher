@@ -1,6 +1,6 @@
 /// 场景表：一条场景 = 把沙盒后端摆成某种状态，界面自己会长成那样。
 /// 只改 st 与发事件，绝不直接碰 DOM —— 否则验的就不是真实渲染路径了。
-import { cancelUpdate, emit, pushReadiness, pushStatus, reset, st } from "./sim";
+import { cancelUpdate, emit, memLive, pushReadiness, pushStatus, reset, st } from "./sim";
 
 export interface Scenario {
   group: string;
@@ -277,6 +277,43 @@ scenario("事件", "ev.serverpush", "后台探到服务端更新", "只点亮小
 
 scenario("事件", "ev.close", "点标题栏关闭", "应弹三选一，而不是直接走", () => {
   emit("close-requested", {});
+});
+
+// ------------------------------------------------------------------ 服务端内存
+
+scenario("内存", "mem.none", "三键都没设、也没采样", "卡上两格空、实况块只有一句说明", () => {
+  reset();
+  settle({});
+});
+
+scenario("内存", "mem.live", "已设限、采样在跑", "尺 + 小曲线 + 六个数", () => {
+  reset();
+  settle({});
+  st.mem_tuning = { server_memory_limit_mib: 4096, go_mem_target_mib: 2048, import_max_procs: 8 };
+  st.mem_live = memLive();
+});
+
+scenario("内存", "mem.unlimited", "没设硬上限但照样打点", "不画那把尺，硬上限显示「不限」", () => {
+  reset();
+  settle({});
+  st.mem_live = memLive({ hard_limit_mib: null });
+});
+
+scenario("内存", "mem.ended", "本场收尾", "峰值出现、芯片改灰，数字仍留着", () => {
+  reset();
+  settle({});
+  st.mem_live = memLive({ ended: true, peak_private_mib: 2099, seconds: 5123.9, private_mib: 0, working_mib: 0 });
+});
+
+scenario("内存", "mem.old", "旧编排器 + 采样停了", "两条提醒都要显示，不许摆假数", () => {
+  reset();
+  settle({});
+  st.mem_live = memLive({
+    policy: "local-stability-20261008-r1",
+    hard_limit_mib: 4096,
+    stale: true,
+    note: "这一场跑的是旧编排器（policy=local-stability-20261008-r1），本场上限口径按旧版算。",
+  });
 });
 
 // ------------------------------------------------------------------ 页面与主题

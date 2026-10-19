@@ -7,6 +7,7 @@ import {
   type Readiness,
 } from "../bridge";
 import { SCHEMES, type Glass, type Scheme } from "../theme";
+import MemoryCard from "./MemoryCard";
 
 export type LaunchMode = "compat" | "server-only";
 
@@ -150,6 +151,8 @@ export default function SettingsPage({
             <p className="hint">启动器只在缺配置时补一份 SQLite 档，绝不覆盖或预建库文件。</p>
           </div>
         </section>
+
+        <MemoryCard onNotice={onNotice} />
       </div>
 
       <div className="column">

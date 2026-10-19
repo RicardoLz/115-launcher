@@ -16,6 +16,7 @@ use crate::background;
 use crate::config::{self, valid_account};
 use crate::health;
 use crate::logbus::Line;
+use crate::memory;
 use crate::mods;
 use crate::paths::{self, Root, CLIENT_IMAGE_NAME};
 use crate::portguard::{self, Report};
@@ -718,6 +719,75 @@ pub async fn autofire_stop(state: tauri::State<'_, AppState>) -> Result<ActionRe
     })
     .await
     .map(|message| ActionRecord { message })
+}
+
+// ------------------------------------------------------ 服务端内存调节与实况
+
+/// 三项的取值边界由后端报给界面，免得两边各抄一份、Go 改了这边不知道。
+#[derive(Serialize)]
+pub struct MemoryConfig {
+    pub tuning: config::MemoryTuning,
+    pub path: String,
+    pub max_memory_mib: u64,
+    pub max_import_procs: u64,
+    /// `import_max_procs` 不写时 Go 用的默认值（= CPU 逻辑核数），只为把提示说清楚。
+    pub cpu_count: usize,
+}
+
+#[tauri::command]
+pub async fn memory_config(state: tauri::State<'_, AppState>) -> Result<MemoryConfig, String> {
+    let root = state.root.clone();
+    block(move || MemoryConfig {
+        tuning: config::memory_tuning(&root),
+        path: root.launcher_local_json().display().to_string(),
+        max_memory_mib: config::MAX_MEMORY_MIB,
+        max_import_procs: config::MAX_IMPORT_PROCS,
+        cpu_count: std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(0),
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn memory_save(
+    state: tauri::State<'_, AppState>,
+    tuning: config::MemoryTuning,
+) -> Result<ActionRecord, String> {
+    let session = state.session.clone();
+    let root = state.root.clone();
+    let saved = join(move || config::set_memory_tuning(&root, &tuning)).await?;
+    let message = format!(
+        "服务端内存设置已写入（{}）：{}；下次「开始游戏」才生效",
+        state.root.launcher_local_json().display(),
+        describe_tuning(&saved)
+    );
+    session.bus().ok(message.clone());
+    Ok(ActionRecord { message })
+}
+
+/// 面板 2 秒轮一次：采样本来就是 2 秒一条，再快也只是重读同一行。
+/// `None` = 读不到（没有会话、或那一场的日志里没有 MEMORY_GUARD），界面自己隐藏实况块。
+#[tauri::command]
+pub async fn memory_live(state: tauri::State<'_, AppState>) -> Result<Option<memory::Live>, String> {
+    let root = state.root.clone();
+    block(move || memory::live(&root)).await
+}
+
+fn describe_tuning(tuning: &config::MemoryTuning) -> String {
+    let mib = |value: Option<u64>| match value {
+        Some(n) => format!("{n} MiB"),
+        None => "不限".to_string(),
+    };
+    format!(
+        "提交内存硬上限 {}，Go 内存目标 {}，导入并发 {}",
+        mib(tuning.server_memory_limit_mib),
+        mib(tuning.go_mem_target_mib),
+        tuning
+            .import_max_procs
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "默认".to_string())
+    )
 }
 
 // ---------------------------------------------------------------- 存档页

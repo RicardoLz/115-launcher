@@ -438,6 +438,50 @@ export interface UpdateProgress {
   text: string;
 }
 
+/**
+ * 服务端内存三键。`null` = 这个键不写 = 不限，与 Go 侧 `*uint64` 的口径一一对应；
+ * 键名沿用磁盘上的写法（snake_case），因为这份文件是编排器在读。
+ */
+export interface MemoryTuning {
+  server_memory_limit_mib: number | null;
+  go_mem_target_mib: number | null;
+  import_max_procs: number | null;
+}
+
+export interface MemoryConfig {
+  tuning: MemoryTuning;
+  path: string;
+  /** 边界由后端给：Go 改了这里，界面不用跟着改代码。 */
+  max_memory_mib: number;
+  max_import_procs: number;
+  /** 不写 import_max_procs 时 Go 自己用的默认值（CPU 逻辑核数）。 */
+  cpu_count: number;
+}
+
+/** 从服务端 `gateway.err` 的 MEMORY_GUARD 采样行读来的实况；`null` = 读不到，界面就藏起这块。 */
+export interface MemoryLive {
+  session: string;
+  path: string;
+  pid: number;
+  policy: string;
+  /** `null` = 本场没设硬上限。 */
+  hard_limit_mib: number | null;
+  low_memory_mib: number;
+  seconds: number;
+  /** 进程私有提交：离硬上限多远看这个数。 */
+  private_mib: number;
+  working_mib: number;
+  system_available_mib: number;
+  /** 只有本场收尾后才有。 */
+  peak_private_mib: number | null;
+  ended: boolean;
+  stale: boolean;
+  samples: number;
+  series: number[];
+  /** 空串 = 正常；否则是要给玩家看的提醒。 */
+  note: string;
+}
+
 export const commands = {
   appInfo: () => invoke<AppInfo>("app_info"),
   logSnapshot: (limit = 600) => invoke<LogLine[]>("log_snapshot", { limit }),
@@ -490,6 +534,9 @@ export const commands = {
   feedbackSubmit: (input: Submission) => invoke<SubmitOutcome>("feedback_submit", { input }),
   pickClientDir: () => invoke<ActionRecord>("pick_client_dir"),
   discoverClient: () => invoke<ActionRecord>("discover_client"),
+  memoryConfig: () => invoke<MemoryConfig>("memory_config"),
+  memorySave: (tuning: MemoryTuning) => invoke<ActionRecord>("memory_save", { tuning }),
+  memoryLive: () => invoke<MemoryLive | null>("memory_live"),
   serverUpdateCheck: () => invoke<ServerUpdateCheck>("server_update_check"),
   serverUpdateApply: () => invoke<ActionRecord>("server_update_apply"),
   selfUpdateCheck: () => invoke<SelfUpdateCheck>("self_update_check"),

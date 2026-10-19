@@ -1983,7 +1983,124 @@ pre.evidence {
   color: var(--text-faint);
 }
 
+/* 「服务端内存」卡：三格设置 + 只读实况。数字全用等宽，扫一眼就能比出涨跌。 */
+.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
 
+/* 一格 = 标题行（.num 那套）+ 它自己的口径行；口径行在校验失败时原地换成红色那句。 */
+.mem-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mem-row .num {
+  align-items: flex-end;
+}
+
+.mem-row .num > span {
+  align-self: center;
+  font-size: 12.5px;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+/* 数值最长 14 位（编排器认得到的上限），74px 装不下，这卡里放宽到 104px。 */
+.mem-row .num input {
+  width: 104px;
+}
+
+.mem-row .num input::placeholder {
+  color: var(--text-faint);
+}
+
+/* 这把尺只在读到硬上限时才画：没上限还画比例，等于自己编一个分母。 */
+.mem-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--hover);
+}
+
+.mem-track i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ok);
+  transition: width 0.45s var(--ease-rail);
+}
+
+.mem-track i[data-tone="busy"] {
+  background: var(--accent);
+}
+
+.mem-track i[data-tone="err"] {
+  background: var(--err);
+}
+
+/* 6px 高的尺放不下字，比例这行挂在它底下，但归进同一块，读起来是一句话。 */
+.mem-cap {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* 采样小曲线：viewBox 拉满整宽，描边不跟着缩放，否则曲线会糊成一条带。 */
+.mem-spark {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-top: 20px;
+}
+
+.mem-spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.mem-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 9px 14px;
+  margin: 2px 0 0;
+}
+
+.mem-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mem-stats dt {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+}
+
+.mem-stats dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.mem-warn {
+  display: block;
+  margin-top: 3px;
+  color: var(--err-ink);
+  font-weight: 600;
+}
 
 /* ------------------------------------------------------------------ 反馈页 */
 
