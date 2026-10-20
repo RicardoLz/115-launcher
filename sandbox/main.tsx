@@ -104,14 +104,27 @@ const pageKey = params.get("page");
 if (pageKey || params.get("focus")) {
   setTimeout(() => {
     if (pageKey) {
+      // 认整条侧栏而不只是 .rail-nav：开发者那一项挂在底部的 foot 组里，不在 .rail-nav 内。
       document
-        .querySelector<HTMLButtonElement>(`.rail-nav button[aria-label="${pageKey}"]`)
+        .querySelector<HTMLButtonElement>(`.rail .rail-item[aria-label="${pageKey}"]`)
         ?.click();
     }
     setTimeout(() => {
       if (params.get("focus")) document.querySelector<HTMLButtonElement>('.field[data-pop="true"] .switch')?.focus();
     }, 60);
   }, 60);
+}
+// ?collapse=log,modkit 进完页就把这几块的「收起」按钮按一遍：无头页没有鼠标，
+// 摆放栏与胶囊那两套状态只能这样摆出来。真机不读这个参数。
+const collapseBy = params.get("collapse");
+if (collapseBy) {
+  setTimeout(() => {
+    for (const key of collapseBy.split(",").filter((x) => x !== "")) {
+      document
+        .querySelector<HTMLButtonElement>(`.panel[data-panel="${key}"] [data-act="collapse"]`)
+        ?.click();
+    }
+  }, 180);
 }
 // ?glide=240 推一发滚轮进 .page，并把 scrollTop 逐帧抄进画面左上角。
 // 隐藏页与无头页里 rAF 干脆不回调（glide 自己也据此走「直接落位」那条），所以曲线只有真窗口铺得开；

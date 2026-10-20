@@ -7,6 +7,7 @@ import {
   GripIcon,
   MaximizeIcon,
   MinimizeIcon,
+  PillIcon,
   RestoreIcon,
 } from "./icons";
 import { useMaximized } from "./WindowControls";
@@ -19,6 +20,8 @@ export type Chrome = {
   title: string;
   floating: boolean;
   onLeave: (panel: PanelKey) => void;
+  /// 收进右侧摆放栏。只有停靠层给得起这个动作，独立窗口没有（它是另一扇窗，不占开发者页的位置）。
+  onCollapse?: (panel: PanelKey) => void;
   onHeadPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void;
 };
 
@@ -43,6 +46,17 @@ export function PanelFrame({ extra, children }: { extra?: ReactNode; children: R
         <h2>{chrome?.title}</h2>
         <span className="spacer" />
         {extra}
+        {chrome?.onCollapse ? (
+          <button
+            className="tool-btn"
+            data-act="collapse"
+            aria-label={`把${chrome.title}收起成胶囊`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => chrome.onCollapse?.(chrome.panel)}
+          >
+            <PillIcon size={16} />
+          </button>
+        ) : null}
         {chrome ? (
           <button
             className={chrome.floating ? "win-btn" : "tool-btn"}

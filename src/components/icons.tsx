@@ -167,6 +167,16 @@ export function DockIcon({ size = 16 }: IconProps) {
   );
 }
 
+/// 收起成胶囊：箭头落进一枚胶囊里。
+export function PillIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <rect x="3.4" y="13.6" width="17.2" height="6.4" rx="3.2" />
+      <path d="M12 3.2v7.6M9.2 8.2 12 11l2.8-2.8" />
+    </svg>
+  );
+}
+
 /// 抓手：提示这一段标题栏可以拖。
 export function GripIcon({ size = 14 }: IconProps) {
   return (

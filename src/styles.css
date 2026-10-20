@@ -1088,10 +1088,13 @@ body {
   overflow: hidden;
 }
 
+/* 标题栏挤不下的时候让它折行，而不是把标题压成一列竖字：这一行有抓手、标题、状态芯片，
+   再加收起与浮出两枚按钮，窄格子里必然放不下。宁可高一行，也不能让「客户端插件」变成五竖。 */
 .panel-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 9px;
+  gap: 6px 9px;
   padding: 11px 14px;
   border-bottom: 1px solid var(--line);
   touch-action: none;
@@ -1099,6 +1102,7 @@ body {
 
 .panel-head h2 {
   margin: 0;
+  white-space: nowrap;
 }
 
 .panel-head > svg:first-child {
@@ -1108,6 +1112,7 @@ body {
 
 .panel-head .chip {
   padding: 3px 9px;
+  white-space: nowrap;
 }
 
 .panel-head[data-grab="drag"] {
@@ -1168,10 +1173,20 @@ body {
   padding: 14px 16px;
 }
 
+/* 开发者页两列：左边停靠树，右边那一条是胶囊摆放栏。 */
 .dock {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  gap: 10px;
   height: 100%;
+  min-height: 0;
+}
+
+.dock-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -1298,6 +1313,88 @@ body {
   border-color: var(--accent-deep);
 }
 
+/* 右侧摆放栏：收起的面板在这儿排成一列胶囊。整栏刻意做窄，不跟停靠树抢地方。 */
+.pill-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: none;
+  width: 152px;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  overflow: auto;
+}
+
+.tray-title {
+  padding: 0 2px 1px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  color: var(--text-faint);
+}
+
+.tray-hint {
+  padding: 2px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+/* 胶囊本身：一枚能抓起来的圆角条，悬停才亮边框，静置时不该抢面板的注意力。 */
+.tray-pill {
+  display: flex;
+  align-items: center;
+  flex: none;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg-2) 100%);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: grab;
+  touch-action: none;
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tray-pill:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: 0 6px 16px -10px var(--shadow);
+}
+
+.tray-pill:active {
+  cursor: grabbing;
+  transform: scale(0.97);
+}
+
+/* 正被拖着的那一枚留在栏里变淡，跟停靠区里那一块的处理一致。 */
+.tray-pill[data-dragging="true"] {
+  opacity: 0.42;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 收起来那一下，胶囊是从标题栏的位置掉进栏里的。 */
+  .tray-pill {
+    animation: pill-in 0.22s cubic-bezier(0.22, 0.68, 0.32, 1) both;
+  }
+}
+
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* 浮出去的独立窗口：整窗就是这一块面板 */
 .app-panel {
   padding: 9px;
@@ -1412,7 +1509,7 @@ input[type="text"]:focus {
   background: var(--btn-hover-bg);
 }
 
-:is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .facet, .issue-item, .rail-item, .log-tabs button):focus-visible {
+:is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .tray-pill, .facet, .issue-item, .rail-item, .log-tabs button):focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -1989,6 +2086,32 @@ pre.evidence {
   font-size: 11.5px;
   color: var(--text-dim);
   white-space: nowrap;
+}
+
+/* 面板正文：标题栏不跟着滚，设置与实况两块各自成一段。 */
+.mem-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+}
+
+/* 写入结果与后端那句拒绝：贴在按钮下面，6 秒后自己收掉。 */
+.mem-note {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.6;
+  background: color-mix(in oklab, var(--ok) 12%, transparent);
+  color: var(--text);
+}
+
+.mem-note[data-tone="err"] {
+  background: color-mix(in oklab, var(--err) 14%, transparent);
 }
 
 /* 一格 = 标题行（.num 那套）+ 它自己的口径行；口径行在校验失败时原地换成红色那句。 */
@@ -3241,7 +3364,7 @@ select:disabled {
    backdrop-filter 只糊它身后那一叠，不动它自己的文字，所以 ::before 留给跟光标的高光边，
    ::after 空出来给「检查更新」那颗小红点（红点必须挂在按钮角上，只有 ::after 能用）。
    纱比卡片再薄一档：药丸小，同样的浓度糊上去就成一坨灰块，反而看不出透光。 */
-:root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme) {
+:root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .tray-pill) {
   position: relative;
   isolation: isolate;
   border-color: transparent;
@@ -3267,13 +3390,13 @@ select:disabled {
   backdrop-filter: none;
 }
 
-:root[data-glass="on"] :is(.tool-btn, .account-item, .btn):hover:not(:disabled) {
+:root[data-glass="on"] :is(.tool-btn, .account-item, .btn, .tray-pill):hover:not(:disabled) {
   background: var(--glass-btn-lift);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 
 /* 高光边：与卡片同一份配方，只把半径交给药丸自己（inherit），角度跟着光标走。 */
-:root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme)::before {
+:root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .tray-pill)::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -3300,7 +3423,7 @@ select:disabled {
 }
 
 /* 静止就有底的那几档才挂高光边；hover 才砌玻璃的那三档等 hover 再挂。 */
-:root[data-glass="on"] :is(.segmented button, .scheme)::before,
+:root[data-glass="on"] :is(.segmented button, .scheme, .tray-pill)::before,
 :root[data-glass="on"] .btn:not([data-tone="ghost"])::before,
 :root[data-glass="on"] :is(.btn, .tool-btn, .account-item):hover:not(:disabled)::before {
   opacity: 1;
@@ -3332,7 +3455,7 @@ select:disabled {
   /* 光泽角是纯着色，不动几何；但跟随光标本身算动，这里直接钉死成一个角度——
      卡片（::after）与按钮（::before）各钉一条，弹性形变那一档已随折射整条撤掉。 */
   :root[data-glass="on"] :is(.card, .blank, .sheet, .account-pop)::after,
-  :root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme)::before {
+  :root[data-glass="on"] :is(.btn, .tool-btn, .segmented button, .account-item, .scheme, .tray-pill)::before {
     background: linear-gradient(126deg, transparent 0%, var(--glass-hair) 40%, transparent 100%);
   }
 }

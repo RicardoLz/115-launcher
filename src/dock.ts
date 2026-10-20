@@ -1,9 +1,9 @@
 //! 开发者页的停靠层：一棵二分树（叶子=面板，内节点=分割）。
 //! 这里只有纯数据与纯函数，命中测试用 CSS 像素，DOM 一律不碰。
 
-export type PanelKey = "log" | "mode" | "mods" | "modkit";
+export type PanelKey = "log" | "mode" | "mods" | "modkit" | "memory";
 
-export const PANEL_KEYS: PanelKey[] = ["log", "mode", "mods", "modkit"];
+export const PANEL_KEYS: PanelKey[] = ["log", "mode", "mods", "modkit", "memory"];
 
 export type Dir = "v" | "h";
 export type Edge = "top" | "bottom" | "left" | "right";
@@ -17,22 +17,30 @@ export type SplitNode = Extract<DockNode, { t: "split" }>;
 /// 拖到的位置：edge=null 表示落在某块面板正中＝两块交换。
 export type Zone = { k: PanelKey; edge: Edge | null };
 
+/// 默认摆法：左边一整列给运行日志（它最吃高度），右边 2×2 放其余四块。
+/// 五块平铺会挤到每块都放不下正文，所以日志单独占一侧。
 export const DEFAULT_DOCK: DockNode = {
   t: "split",
-  dir: "v",
-  r: 0.52,
+  dir: "h",
+  r: 0.44,
   a: { t: "leaf", k: "log" },
   b: {
     t: "split",
-    dir: "h",
-    r: 0.34,
-    a: { t: "leaf", k: "mode" },
+    dir: "v",
+    r: 0.5,
+    a: {
+      t: "split",
+      dir: "h",
+      r: 0.5,
+      a: { t: "leaf", k: "mode" },
+      b: { t: "leaf", k: "mods" },
+    },
     b: {
       t: "split",
-      dir: "v",
+      dir: "h",
       r: 0.5,
-      a: { t: "leaf", k: "mods" },
-      b: { t: "leaf", k: "modkit" },
+      a: { t: "leaf", k: "modkit" },
+      b: { t: "leaf", k: "memory" },
     },
   },
 };

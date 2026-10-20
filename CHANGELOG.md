@@ -50,6 +50,70 @@
 
 ---
 
+## 2026-10-19 · 服务端内存卡片搬进开发者页、卡片可收起成胶囊
+
+> TL;DR — 「服务端内存」不再是设置页的一张卡，而是开发者页停靠层的第五块面板；每块面板标题栏多一枚
+> 「收起」按钮，把它折成右侧「摆放栏」里的一枚胶囊，点一下接回末尾、拖着可以摆到任意分割位。
+
+**改动**
+
+- `src/dock.ts`：`PanelKey` 增加 `memory`，默认布局把 `服务端内存` 排在 `客户端插件` 右边
+  （`h-split 0.44 { 日志, v-split { {模式, mod}, {插件, 内存} } }`）。
+- `src/components/MemoryCard.tsx` 改成**无 props** 的面板正文：通知不再依赖主窗口的全局 toast，
+  改成卡片正文下方一行 6 秒后自动消失的 `.mem-note`——这样 dock 里和独立浮出窗口里表现一致。
+  `src/components/SettingsPage.tsx` 里那张卡整体移除，设置页只剩 启动 / 客户端与存档 / 配色方案 /
+  液态玻璃 / 自动上报 / 主页背景。
+- `tauri.conf.json` 预声明 `panel-memory` 浮窗（520×620，与其余四块同一套 ACL 与无边框配置）。
+- 收起成胶囊是**派生状态**，不额外落盘：某块是胶囊 ⇔ 它既没浮出、也不在 dock 树里；收起 =
+  `strip(node, k)`，展开 = `place(node, k, null)`（接在文档序末尾）。摆放栏顺序按 `PANEL_KEYS`，
+  不受收起先后影响。因此 `leaves ∪ pills` 恒等于五块，不会出现「既不在栏里也不在树上」的孤儿面板。
+- 标题栏挤不下的时候折行而不是把标题压成一列竖字：`.panel-head` 改 `flex-wrap: wrap`，标题与状态芯片
+  `white-space: nowrap`。加了收起/浮出两枚按钮后，窄格子里「客户端插件」曾竖排成五个字。
+- `.tray-pill` 接进液态玻璃引擎（高光、悬停抬起、减弱动效三处规则）与 focus-visible 环；玻璃规则的
+  特异性高于 `.tray-pill:hover`，不挂进去胶囊就没有悬停反馈。
+
+**验收**
+
+- 沙盒 32 用例 0 失败。新增 `K03 开发者页：收起成胶囊、摆放栏点数、点胶囊归位`，逐步断言真实序列：
+  `log,mode,mods,modkit,memory ▸ 空栏` → 收起内存 → `…modkit ▸ memory` → 收起日志 →
+  `mode,mods,modkit ▸ log,memory` → 点内存胶囊 → `…modkit,memory ▸ log` → 点日志胶囊 → 五块全回、空栏
+  → 收起/展开 mod 后仍是五块。探针 `sandbox/probe.ts` 新增 `dock.{leaves,pills,tray}` 与 `memory.note`。
+- 沙盒 URL 新增 `?collapse=log,modkit`：无头页没有鼠标，只能这样把胶囊态摆出来拍照；真机不读这个参数。
+  `?page=` 选择器修成 `.rail .rail-item[aria-label=…]`（「开发者」在侧栏底部组，`.rail-nav` 选不到）。
+- 出图四张（暗色五块、暗色三枚胶囊、亮色+玻璃两枚胶囊、设置页已无内存卡）：
+  `tmp/shots/dev-dark2.png`、`dev-dark-pills2.png`、`dev-light-glass-pills2.png`、`settings-dark.png`。
+- 门禁：`tsc --noEmit` / `tsc -p tsconfig.sandbox.json --noEmit` / `npm run build` 全 0，
+  `cargo test --lib` 50 通过 0 失败。界面仍无「默认 4 GiB / 2 GiB」字样（产物字节计数为 0）。
+
+**出包与换上** 新 `854cdafb53e153a7dfc245a450da05f8708b2ed3f1d34588fbf3d8db818246f1`（8 798 208 字节），
+已装进 `<服务端>\dfo-launcher.exe`；被它换下的上一轮（服务端内存面板）那枚
+`e9f6a5f8…c74926f` 留名为 `dfo-launcher.exe.bak-e9f6a5f8`。同代判据构建前后各跑一次：前一次只列出本轮
+10 个文件（含 `tauri.conf.json`），后一次为空。本轮没动 Rust，正面证据换成内嵌资产名——新 exe 内嵌
+`index-DV3XqcRT.js`（1 次），换上前的那枚计数 0；`dist/assets/index-DV3XqcRT.js` 里「摆放栏」2 次、
+「收起成胶囊」1 次、`4 GiB` / `2 GiB` 各 0 次。（exe 里中文串两侧都是 0：内嵌 dist 被压缩，不是没进包。）
+旧那枚的行为结论：`服务端内存` 仍只在设置页，开发者页是四块面板、标题栏没有收起按钮、也就没有右侧摆放栏——
+凑合能用，但这一轮的两项改动在它上面都看不见。
+
+**换下又换回（同日 02:28）** 上面那次装上之后，点了一次「更新版本」：自更新把发布在
+`RicardoLz/115-launcher` releases/latest 的那枚覆盖进 `<服务端>\dfo-launcher.exe`
+（`32c90ed2…4b729685`，8 815 616 字节）。按内嵌前端资产名判它的代次：它是 `index-I6QjgH73.js` /
+`index-CVQ4oQBE.css`，且带 `MEMORY_GUARD` + `launcher.local.json` ⇒ 源码是 `09415dd`（上一轮），
+**没有**这一轮的胶囊与摆放栏。这条判断已复现而不只是推断：本轮 `git diff 09415dd..HEAD -- src-tauri/src` 为空
+（Rust 一行没动，所以差异只可能在 `dist`），而在 detach worktree 里对 `09415dd` 重跑一次 vite 构建，打出的资产名
+正是 `index-I6QjgH73.js` / `index-CVQ4oQBE.css`——与那枚 exe 内嵌的逐字相同。（单看 `MEMORY_GUARD` 只能证「≥ 09415dd」，
+不能定代次。）重新构建后换成 `72927335e0165f212aa01250474945fc98429496de2451d423cda4528e4bafaa`
+（8 798 208 字节，内嵌 `index-DV3XqcRT.js`，与本轮 `npm run build` 打印的资产名一致）；
+`32c90ed2` 留名为 `dfo-launcher.exe.bak-32c90ed2`。同代判据这次跑的是「构建前为空」（源码自分代构建后未再改动）
++ 构建后再次为空。哈希与上一次装机的 `854cdafb…8246f1` 不等是 `tauri build` 两次 patch bundle-type 与内嵌
+时间戳造成的，不是源码差——代次只认资产名。
+（另：先前留的 `dfo-launcher.exe.bak-e9f6a5f8` 这次在整合包目录里已经没有了，不是自更新代码删的——
+`self_updater.rs` 只 `remove_file` 它自己下载的临时件——但具体谁删的没证据，记为未知。）
+
+**还没做** 沙盒只走「点胶囊归位」这条路径；拖放落位复用停靠层已有的
+拖动管线（`justDragged` 闸门保证拖完不会顺手触发一次归位点击），本轮没有在真机上拖过。
+
+---
+
 ## 2026-10-18 · 启动界面重做、背景层与沙盒台（`535fda9`）
 
 - `ControlPanel` 拆成 `LaunchDock` / `ModsPanel` / `ModkitPanel`；「开始游戏」改右下角悬浮开关，账号改胶囊按钮 +

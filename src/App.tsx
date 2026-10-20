@@ -70,6 +70,7 @@ export default function App() {
     mode: false,
     mods: false,
     modkit: false,
+    memory: false,
   });
   /// 独立窗口正被拖回主窗：这个落点交给停靠层画窗口内的吸附提示。
   const [panelHover, setPanelHover] = useState<{ panel: PanelKey; x: number; y: number } | null>(

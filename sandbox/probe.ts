@@ -53,7 +53,13 @@ export interface Snapshot {
   entry: string[];
   /** 根节点上的 data-scheme；空串 = 还没写过，等于默认那套琥珀。 */
   scheme: string;
-  /** 「服务端内存」卡：三格输入值、就地拦下的错误、六个读数、尺宽%、小曲线点数、提醒句；null = 卡不在这一页。 */
+  /** 开发者页停靠层：树上按渲染顺序挂着的面板、右侧摆放栏里的胶囊、那一栏在不在；null = 这一页没有停靠层。 */
+  dock: {
+    leaves: string[];
+    pills: string[];
+    tray: boolean;
+  } | null;
+  /** 「服务端内存」卡：三格输入值、就地拦下的错误、六个读数、尺宽%、小曲线点数、提醒句、卡内那句回执；null = 卡不在这一页。 */
   memory: {
     inputs: string[];
     errs: string[];
@@ -61,6 +67,8 @@ export interface Snapshot {
     track: string | null;
     points: number;
     warn: string;
+    note: string;
+    noteTone: string | null;
   } | null;
   animations: { name: string; state: string; time: number | null }[];
   overflowing: string[];
@@ -181,6 +189,10 @@ export function snapshot(): Snapshot {
   const memCard = pick(".mem-card");
   const memTrack = memCard?.querySelector<HTMLElement>(".mem-track i") ?? null;
   const memSpark = memCard?.querySelector("polyline") ?? null;
+  const memNote = memCard?.querySelector<HTMLElement>(".mem-note") ?? null;
+  // 停靠层里挂着谁、摆放栏里躺着谁，只能按渲染顺序读：胶囊就是「不在树上又没浮出去」的那一块，
+  // 所以这两条列表合起来必须正好是全部面板，缺一个就是收起/归位走岔了。
+  const dock = pick(".dock");
   const bgImg = document.querySelector(".bg-layer img");
   const bgVideo = document.querySelector(".bg-layer video");
   const bgNode = (bgImg ?? bgVideo) as HTMLImageElement | HTMLVideoElement | null;
@@ -292,6 +304,18 @@ export function snapshot(): Snapshot {
             .getAnimations()
             .map((item) => (item as Animation & { animationName?: string }).animationName ?? item.constructor.name),
     scheme: document.documentElement.dataset.scheme ?? "",
+    dock:
+      dock === null
+        ? null
+        : {
+            leaves: Array.from(dock.querySelectorAll<HTMLElement>(".dock-main .panel[data-panel]")).map(
+              (node) => node.dataset.panel ?? "",
+            ),
+            pills: Array.from(dock.querySelectorAll<HTMLElement>(".tray-pill")).map(
+              (node) => node.dataset.panel ?? "",
+            ),
+            tray: dock.querySelector(".pill-tray") !== null,
+          },
     memory: memCard
       ? {
           inputs: Array.from(memCard.querySelectorAll<HTMLInputElement>(".num input")).map((node) => node.value),
@@ -302,6 +326,8 @@ export function snapshot(): Snapshot {
           track: memTrack ? `${memTrack.style.width ?? ""}|${memTrack.dataset.tone ?? ""}` : null,
           points: (memSpark?.getAttribute("points") ?? "").trim().split(/\s+/).filter((x) => x !== "").length,
           warn: memCard.querySelector<HTMLElement>(".mem-warn")?.textContent?.trim() ?? "",
+          note: memNote?.textContent?.trim() ?? "",
+          noteTone: memNote?.dataset.tone ?? null,
         }
       : null,
     animations: freezeAnimations(),

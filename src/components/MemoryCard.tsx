@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PanelFrame } from "./PanelFrame";
 import {
   commands,
   errText,
@@ -78,12 +79,24 @@ function Spark({ series }: { series: number[] }) {
   );
 }
 
-export default function MemoryCard({
-  onNotice,
-}: {
-  onNotice: (text: string, tone?: "ok" | "err") => void;
-}) {
+export default function MemoryCard() {
   const [cfg, setCfg] = useState<MemoryConfig | null>(null);
+  // 提示写在卡里，不借主窗那条全局横幅：这块面板能浮成独立窗口，那儿的话在浮窗里没人听得见。
+  const [note, setNote] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
+  const noteTimer = useRef<number | null>(null);
+
+  const flash = useCallback((text: string, tone: "ok" | "err" = "ok") => {
+    setNote({ text, tone });
+    if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);
+    noteTimer.current = window.setTimeout(() => setNote(null), 6000);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);
+    },
+    [],
+  );
   const [draft, setDraft] = useState<Record<Key, string>>({
     server_memory_limit_mib: "",
     go_mem_target_mib: "",
@@ -112,9 +125,9 @@ export default function MemoryCard({
         import_max_procs: view.tuning.import_max_procs?.toString() ?? "",
       });
     } catch (err) {
-      onNotice(errText(err), "err");
+      flash(errText(err), "err");
     }
-  }, [onNotice]);
+  }, [flash]);
 
   useEffect(() => {
     void reload();
@@ -153,11 +166,11 @@ export default function MemoryCard({
     setBusy(true);
     try {
       const record = await commands.memorySave(next);
-      onNotice(record.message);
+      flash(record.message);
       await reload();
     } catch (err) {
       // 后端守着同一套边界，它拒绝时就照它那句话显示，不另编一份文案。
-      onNotice(errText(err), "err");
+      flash(errText(err), "err");
     } finally {
       setBusy(false);
     }
@@ -169,113 +182,116 @@ export default function MemoryCard({
       : null;
 
   return (
-    <section className="card mem-card">
-      <h2>服务端内存</h2>
+    <PanelFrame>
+      <div className="mem-body mem-card">
+        <div className="field">
+          {FIELDS.map((item) => (
+            <div className="mem-row" key={item.key}>
+              <label className="num">
+                <span>{item.label}</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder={item.blank}
+                  value={draft[item.key]}
+                  disabled={busy || cfg === null}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, [item.key]: e.target.value }))}
+                />
+                <em>{item.unit}</em>
+              </label>
+              <p className="hint" data-tone={errors[item.key] === undefined ? undefined : "err"}>
+                {errors[item.key] ?? item.note}
+              </p>
+            </div>
+          ))}
 
-      <div className="field">
-        {FIELDS.map((item) => (
-          <div className="mem-row" key={item.key}>
-            <label className="num">
-              <span>{item.label}</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder={item.blank}
-                value={draft[item.key]}
-                disabled={busy || cfg === null}
-                onChange={(e) => setDraft((prev) => ({ ...prev, [item.key]: e.target.value }))}
-              />
-              <em>{item.unit}</em>
-            </label>
-            <p className="hint" data-tone={errors[item.key] === undefined ? undefined : "err"}>
-              {errors[item.key] ?? item.note}
-            </p>
+          <div className="row">
+            <span className="spacer" />
+            <button className="btn" data-tone="accent" disabled={busy || cfg === null} onClick={() => void save()}>
+              {busy ? "写入中…" : "写入设置"}
+            </button>
+            <button className="btn" data-tone="ghost" disabled={busy} onClick={() => void reload()}>
+              重读
+            </button>
           </div>
-        ))}
 
-        <div className="row">
-          <span className="spacer" />
-          <button className="btn" data-tone="accent" disabled={busy || cfg === null} onClick={() => void save()}>
-            {busy ? "写入中…" : "写入设置"}
-          </button>
-          <button className="btn" data-tone="ghost" disabled={busy} onClick={() => void reload()}>
-            重读
-          </button>
+          {/* 写入结果与后端的拒绝都落在这儿：6 秒后自己收掉。 */}
+          {note ? <p className="mem-note" data-tone={note.tone}>{note.text}</p> : null}
+
+          {cfg ? <div className="path">{cfg.path}</div> : null}
+          <p className="hint">
+            留空或 0 = 不限；填 MiB 数字 = 启用。硬上限超了服务端会被系统直接杀掉，慎用低值。
+            <br />
+            这三项只写进上面那个文件（其它键原样保留），编排器下次拉起网关时才读它：改了要重开一场（下次「开始游戏」）才生效。
+            导入并发超过 {cfg?.max_import_procs ?? 65536} 编排器会拒绝启动；不填就是它自己的默认值（本机 {cfg?.cpu_count ?? "…"} 个逻辑核心）。
+          </p>
         </div>
 
-        {cfg ? <div className="path">{cfg.path}</div> : null}
-        <p className="hint">
-          留空或 0 = 不限；填 MiB 数字 = 启用。硬上限超了服务端会被系统直接杀掉，慎用低值。
-          <br />
-          这三项只写进上面那个文件（其它键原样保留），编排器下次拉起网关时才读它：改了要重开一场（下次「开始游戏」）才生效。
-          导入并发超过 {cfg?.max_import_procs ?? 65536} 编排器会拒绝启动；不填就是它自己的默认值（本机 {cfg?.cpu_count ?? "…"} 个逻辑核心）。
-        </p>
-      </div>
-
-      <div className="field">
-        {live ? (
-          <>
-            <div className="row">
-              <span className="chip" data-tone={live.ended ? "idle" : live.stale ? "busy" : "ok"}>
-                {live.ended ? "本场已收尾" : live.stale ? "采样停了" : `采样中 · ${live.seconds.toFixed(0)} 秒`}
-              </span>
-              <span className="spacer" />
-              <span className="mono">进程 {live.pid}</span>
-            </div>
-            <div className="path">{live.session}</div>
-
-            {ratio === null ? <p className="hint">本场没设硬上限（不限）。下面这几个数照常打点。</p> : (
-              <div className="mem-track" title={`${live.private_mib} / ${live.hard_limit_mib ?? 0} MiB`}>
-                <i data-tone={ratio >= 90 ? "err" : ratio >= 70 ? "busy" : "ok"} style={{ width: `${ratio}%` }} />
-                <span className="mono mem-cap">
-                  私有提交占硬上限 {ratio}%（{mibText(live.hard_limit_mib ?? 0)}）
+        <div className="field">
+          {live ? (
+            <>
+              <div className="row">
+                <span className="chip" data-tone={live.ended ? "idle" : live.stale ? "busy" : "ok"}>
+                  {live.ended ? "本场已收尾" : live.stale ? "采样停了" : `采样中 · ${live.seconds.toFixed(0)} 秒`}
                 </span>
+                <span className="spacer" />
+                <span className="mono">进程 {live.pid}</span>
               </div>
-            )}
+              <div className="path">{live.session}</div>
 
-            <Spark series={live.series} />
+              {ratio === null ? <p className="hint">本场没设硬上限（不限）。下面这几个数照常打点。</p> : (
+                <div className="mem-track" title={`${live.private_mib} / ${live.hard_limit_mib ?? 0} MiB`}>
+                  <i data-tone={ratio >= 90 ? "err" : ratio >= 70 ? "busy" : "ok"} style={{ width: `${ratio}%` }} />
+                  <span className="mono mem-cap">
+                    私有提交占硬上限 {ratio}%（{mibText(live.hard_limit_mib ?? 0)}）
+                  </span>
+                </div>
+              )}
 
-            <dl className="mem-stats">
-              <div>
-                <dt>私有提交</dt>
-                <dd>{mibText(live.private_mib)}</dd>
-              </div>
-              <div>
-                <dt>工作集</dt>
-                <dd>{mibText(live.working_mib)}</dd>
-              </div>
-              <div>
-                <dt>系统可用</dt>
-                <dd>{mibText(live.system_available_mib)}</dd>
-              </div>
-              <div>
-                <dt>本场峰值</dt>
-                <dd>{live.peak_private_mib === null ? "还在跑" : mibText(live.peak_private_mib)}</dd>
-              </div>
-              <div>
-                <dt>硬上限</dt>
-                <dd>{live.hard_limit_mib === null ? "不限" : mibText(live.hard_limit_mib)}</dd>
-              </div>
-              <div>
-                <dt>低内存警戒线</dt>
-                <dd>{live.low_memory_mib === 0 ? "—" : mibText(live.low_memory_mib)}</dd>
-              </div>
-            </dl>
+              <Spark series={live.series} />
 
+              <dl className="mem-stats">
+                <div>
+                  <dt>私有提交</dt>
+                  <dd>{mibText(live.private_mib)}</dd>
+                </div>
+                <div>
+                  <dt>工作集</dt>
+                  <dd>{mibText(live.working_mib)}</dd>
+                </div>
+                <div>
+                  <dt>系统可用</dt>
+                  <dd>{mibText(live.system_available_mib)}</dd>
+                </div>
+                <div>
+                  <dt>本场峰值</dt>
+                  <dd>{live.peak_private_mib === null ? "还在跑" : mibText(live.peak_private_mib)}</dd>
+                </div>
+                <div>
+                  <dt>硬上限</dt>
+                  <dd>{live.hard_limit_mib === null ? "不限" : mibText(live.hard_limit_mib)}</dd>
+                </div>
+                <div>
+                  <dt>低内存警戒线</dt>
+                  <dd>{live.low_memory_mib === 0 ? "—" : mibText(live.low_memory_mib)}</dd>
+                </div>
+              </dl>
+
+              <p className="hint">
+                读的是 <span className="mono">gateway.err</span> 里编排器打的 MEMORY_GUARD 采样，2 秒一条；
+                小曲线画最近 {live.series.length} 条私有提交，采样共 {live.samples} 条。
+                只有「私有提交」是拿去跟硬上限比的那个数。
+                {live.note ? <b className="mem-warn">{live.note}</b> : null}
+              </p>
+            </>
+          ) : (
             <p className="hint">
-              读的是 <span className="mono">gateway.err</span> 里编排器打的 MEMORY_GUARD 采样，2 秒一条；
-              小曲线画最近 {live.series.length} 条私有提交，采样共 {live.samples} 条。
-              只有「私有提交」是拿去跟硬上限比的那个数。
-              {live.note ? <b className="mem-warn">{live.note}</b> : null}
+              实时占用：现在读不到采样。它只在服务端由启动器拉起之后才有数——没起过服务端、
+              或那一场的日志里没有打点行，这里就空着，不摆假数。
             </p>
-          </>
-        ) : (
-          <p className="hint">
-            实时占用：现在读不到采样。它只在服务端由启动器拉起之后才有数——没起过服务端、
-            或那一场的日志里没有打点行，这里就空着，不摆假数。
-          </p>
-        )}
+          )}
+        </div>
       </div>
-    </section>
+    </PanelFrame>
   );
 }

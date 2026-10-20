@@ -23,7 +23,9 @@ export type Step =
   | { do: "drag"; dy: number }
   /** 往「服务端内存」卡第 at 格写值（走原生 value setter + input 事件，React 才认这是玩家敲的）。 */
   | { do: "fill"; at: number; value: string }
-  /** 断言内存卡渲染出来的东西：三格的值、拦下的错误、某个读数、尺那一档、小曲线点数区间、提醒句包含。 */
+  /** 断言开发者页停靠层：树上按顺序挂着哪些面板、右侧摆放栏里躺着哪几枚胶囊、那一栏在不在。 */
+  | { do: "dock"; leaves?: string[]; pills?: string[]; tray?: boolean; timeout?: number }
+  /** 断言内存卡渲染出来的东西：三格的值、拦下的错误、某个读数、尺那一档、小曲线点数区间、提醒句包含、卡内那句回执。 */
   | {
       do: "mem";
       inputs?: string[];
@@ -32,6 +34,8 @@ export type Step =
       track?: string | null;
       points?: [number, number];
       warn?: string;
+      note?: string;
+      noNote?: boolean;
       timeout?: number;
     }
   | { do: "shot"; label: string };
@@ -112,11 +116,16 @@ function slim(snap: Snapshot) {
     // 配色方案这一组：scheme 是根节点属性，hue 是它带出来的 --hue，派生色全靠这一个数。
     scheme: snap.scheme,
     hue: snap.accent.hue,
-    // 内存卡：三格输入值 | 六个读数 | 尺那一档（宽%|档名）| 小曲线点数 | 提醒句。null = 这一页没这张卡。
+    // 内存卡：三格输入值 | 六个读数 | 尺那一档（宽%|档名）| 小曲线点数 | 提醒句 | 卡内那句回执。null = 这一页没这张卡。
     mem:
       snap.memory === null
         ? null
-        : `${snap.memory.inputs.join("/")} | ${snap.memory.stats.join("/")} | 尺 ${snap.memory.track ?? "不画"} | ${snap.memory.points} 点${snap.memory.warn === "" ? "" : ` | ${snap.memory.warn}`}`,
+        : `${snap.memory.inputs.join("/")} | ${snap.memory.stats.join("/")} | 尺 ${snap.memory.track ?? "不画"} | ${snap.memory.points} 点${snap.memory.warn === "" ? "" : ` | ${snap.memory.warn}`}${snap.memory.note === "" ? "" : ` | 回执 ${snap.memory.note.slice(0, 40)}`}`,
+    // 停靠层：树上按渲染顺序的面板 | 右侧摆放栏里收起着的胶囊。null = 这一页没有停靠层。
+    dock:
+      snap.dock === null
+        ? null
+        : `${snap.dock.leaves.join(",")} ▸ ${snap.dock.pills.length === 0 ? "空栏" : snap.dock.pills.join(",")}`,
   };
 }
 
@@ -229,6 +238,19 @@ export async function play(item: Case): Promise<Trace[]> {
         setter.call(node, step.value);
         node.dispatchEvent(new Event("input", { bubbles: true }));
         await tick();
+      } else if (step.do === "dock") {
+        await waitUntil(
+          () => {
+            const d = snapshot().dock;
+            if (d === null) return false;
+            if (step.tray !== undefined && d.tray !== step.tray) return false;
+            if (step.leaves !== undefined && d.leaves.join("|") !== step.leaves.join("|")) return false;
+            if (step.pills !== undefined && d.pills.join("|") !== step.pills.join("|")) return false;
+            return true;
+          },
+          `停靠层 ${JSON.stringify(step)}`,
+          step.timeout ?? 4000,
+        );
       } else if (step.do === "mem") {
         await waitUntil(
           () => {
@@ -240,6 +262,9 @@ export async function play(item: Case): Promise<Trace[]> {
             if (step.track !== undefined && m.track !== step.track) return false;
             if (step.points !== undefined && (m.points < step.points[0] || m.points > step.points[1])) return false;
             if (step.warn !== undefined && !m.warn.includes(step.warn)) return false;
+            if (step.note !== undefined && !m.note.includes(step.note)) return false;
+            // 「那句回执已经收掉」也得能断言：6 秒的定时器归零后，卡里不该还留着话。
+            if (step.noNote === true && m.note !== "") return false;
             return true;
           },
           `内存卡 ${JSON.stringify(step)}`,

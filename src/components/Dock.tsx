@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   PANEL_KEYS,
+  leaves,
   place,
   retune,
   strip,
@@ -64,6 +65,8 @@ export default function Dock({
   const leafEls = useRef(new Map<PanelKey, HTMLElement>());
   const dragRef = useRef<Drag | null>(null);
   const zoneRef = useRef<Zone | null>(null);
+  /// 拖完那一下浏览器还会补一次 click：这一枚标记用来把它吞掉。
+  const justDragged = useRef(false);
   const actions = useRef({ setNode, onDetach });
   actions.current = { setNode, onDetach };
 
@@ -96,6 +99,18 @@ export default function Dock({
     setZone(null);
   };
 
+  /// 收起只是把它从树上摘掉：谁「既不在树上、又没浮出去」，谁就是右侧那一枚胶囊，
+  /// 所以不用再存一份收起状态，摆在哪一栏永远能从树里推出来。
+  const collapse = (k: PanelKey) => {
+    actions.current.setNode((prev) => strip(prev, k));
+  };
+
+  const expand = (k: PanelKey) => {
+    // 拖动松手后补的那次 click 不能当成「再归位一次」，否则刚选好的落点会被追加到末尾。
+    if (justDragged.current) return;
+    actions.current.setNode((prev) => place(prev, k, null));
+  };
+
   // 拖拽期间的事件挂在 window 上：标题栏元素拿到 pointer capture 后，越出窗口的移动照样能收到。
   const dragging = drag !== null;
   useEffect(() => {
@@ -117,6 +132,11 @@ export default function Dock({
     const up = () => {
       const active = dragRef.current;
       if (active?.moved) {
+        // 真拖过：把紧随其后的那次 click 吞掉（拖的是右侧胶囊时才用得上）。
+        justDragged.current = true;
+        window.setTimeout(() => {
+          justDragged.current = false;
+        }, 0);
         // 松手在窗外：就地开一扇独立窗口（窗口开在指针那儿，看着像同一块面板被拎了出去）。
         if (active.outside) detach(active.k);
         else drop(active.k, zoneRef.current);
@@ -187,7 +207,14 @@ export default function Dock({
         >
           {snap ? <i className="snap" data-edge={snap} /> : null}
           <PanelChrome
-            chrome={{ panel: item.k, title, floating: false, onLeave: detach, onHeadPointerDown: (e) => startDrag(e, item.k) }}
+            chrome={{
+              panel: item.k,
+              title,
+              floating: false,
+              onLeave: detach,
+              onCollapse: collapse,
+              onHeadPointerDown: (e) => startDrag(e, item.k),
+            }}
           >
             <Body />
           </PanelChrome>
@@ -208,30 +235,56 @@ export default function Dock({
   };
 
   const outs = PANEL_KEYS.filter((k) => floating[k]);
+  /// 右侧摆放栏那一列：不在停靠树上、又没浮成独立窗口的，就是收起着的那一枚。
+  const docked = node ? leaves(node) : [];
+  const tray = PANEL_KEYS.filter((k) => !floating[k] && !docked.includes(k));
 
   return (
     <div className="dock" data-drag={drag?.moved ? "true" : undefined}>
-      {node ? (
-        render(node, [])
-      ) : (
-        <section className="blank">
-          <b>开发者页</b>
-          <span>
-            运行日志、游戏内容模式与客户端插件都在这里：按住面板标题栏在页内拖动可以换位、分割，
-            <br />
-            拖出主窗后松手，就在松手那儿开一扇能自由拉伸的独立窗口；再拖回主窗，按提示落位。
-          </span>
-          {outs.length > 0 ? (
-            <div className="row">
-              {outs.map((k) => (
-                <button className="btn" key={k} data-tone="accent" onClick={() => onReturn(k)}>
-                  {PANELS[k].title} 归位
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      )}
+      <div className="dock-main">
+        {node ? (
+          render(node, [])
+        ) : (
+          <section className="blank">
+            <b>开发者页</b>
+            <span>
+              运行日志、游戏内容模式、客户端插件、mod 安装层与服务端内存都摆在这一页：按住面板标题栏在页内拖动可以换位、分割，
+              <br />
+              拖出主窗后松手，就在松手那儿开一扇能自由拉伸的独立窗口；再拖回主窗，按提示落位。
+              <br />
+              标题栏上那枚胶囊图标把面板收进右侧摆放栏，点胶囊立刻归位，也可以把它拖到想落的格子上。
+            </span>
+            {outs.length > 0 ? (
+              <div className="row">
+                {outs.map((k) => (
+                  <button className="btn" key={k} data-tone="accent" onClick={() => onReturn(k)}>
+                    {PANELS[k].title} 归位
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        )}
+      </div>
+
+      <aside className="pill-tray" aria-label="已收起的面板">
+        <b className="tray-title">摆放栏</b>
+        {tray.map((k) => (
+          <button
+            className="tray-pill"
+            data-panel={k}
+            key={k}
+            data-dragging={drag?.moved && drag.k === k ? "true" : undefined}
+            title="拖回开发者页落位，点一下接在末尾"
+            onPointerDown={(event) => startDrag(event, k)}
+            onClick={() => expand(k)}
+          >
+            {PANELS[k].title}
+          </button>
+        ))}
+        {tray.length === 0 ? <span className="tray-hint">面板收起来排在这里</span> : null}
+      </aside>
+
       {hint ? (
         <div
           className="dock-ghost"
