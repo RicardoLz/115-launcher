@@ -8,6 +8,13 @@ mod background;
 mod commands;
 mod config;
 mod health;
+mod gm;
+mod gmchar;
+mod gmgrant;
+mod gmmail;
+mod gmstat;
+mod gmquest;
+mod gmrebuild;
 mod logbus;
 mod memory;
 mod mods;
@@ -45,6 +52,7 @@ pub fn run() {
             session: session.clone(),
             reporter: reporter.clone(),
             autofire: autofire.clone(),
+            gm: gm::GmShared::new(),
             app_dir: app_dir.clone(),
             root: root.clone(),
         })
@@ -133,6 +141,25 @@ pub fn run() {
             commands::memory_config,
             commands::memory_save,
             commands::memory_live,
+            gm::gm_status,
+            gm::gm_search,
+            gm::gm_item,
+            gm::gm_facets,
+            gm::gm_reload,
+            gmrebuild::gm_audit,
+            gmrebuild::gm_rebuild,
+            gmrebuild::gm_pick_pvf,
+            gmchar::gm_character_detail,
+            gmgrant::gm_inventory_status,
+            gmgrant::gm_characters,
+            gmgrant::gm_grant,
+            gmgrant::gm_grant_log,
+            gmgrant::gm_materials,
+            gmgrant::gm_manage,
+            gmstat::gm_growth_options,
+            gmquest::gm_quests,
+            gmquest::gm_quest_preview_mainline,
+            gmquest::gm_quest_preview_prerequisites,
             commands::server_update_check,
             commands::server_update_apply,
             commands::self_update_check,

@@ -4,6 +4,15 @@ import type {
   AutofireView,
   Board,
   FeedbackMeta,
+  GmCharacter,
+  GmAudit,
+  GmFacetsView,
+  GmGrantRecord,
+  GmItemRow,
+  GmQuestPlan,
+  GmQuestView,
+  GmStatusView,
+  GmTableInfo,
   HealthReport,
   ModsState,
   PortReport,
@@ -308,4 +317,451 @@ export const board: Board = {
     { key: "启动", count: 1 },
     { key: "皮肤", count: 1 },
   ],
+};
+
+// ------------------------------------------------------------------ GM 物品库
+
+const gmTable = (entries: number): GmTableInfo => ({
+  present: true,
+  entries,
+  source: "sandbox-sandbox-sandbox",
+  built_at: "2026-10-20T09:00:00Z",
+});
+
+export const gmStatus: GmStatusView = {
+  stage: "就绪",
+  error: "",
+  dir: "D:\\115us\\源码\\115US当前源码\\gm-tool\\configs",
+  catalog: {
+    dir: "D:\\115us\\源码\\115US当前源码\\gm-tool\\configs",
+    items_source: "32dd76978ff079529fcb0356a33ef986f9aed66ec855a908160e3c048e0dae61",
+    count: 671234,
+    equipment: 512345,
+    stackable: 158889,
+    slots: gmTable(40),
+    jobs: gmTable(18),
+    rarity: gmTable(9),
+    names: gmTable(671234),
+  },
+};
+
+/// 同源校验的沙盒夹具：三件 gmbuild 产物同一次构建、PVF 也对得上，界面该显示「一致」。
+const GM_CHECKSUM = "32dd76978ff079529fcb0356a33ef986f9aed66ec855a908160e3c048e0dae61";
+const GM_ARTIFACT = (file: string, role: string, checksum = GM_CHECKSUM) => ({
+  file,
+  role,
+  present: true,
+  checksum,
+  path: "Script.pvf",
+  built_at: "2026-10-21T05:17:55+08:00",
+  size: 865854418,
+});
+
+export const gmAudit: GmAudit = {
+  dir: "D:\\115us\\源码\\115US当前源码\\gm-tool\\configs",
+  pvf_path: "D:\\115us\\客户端\\DFO\\Script.pvf",
+  pvf: {
+    path: "D:\\115us\\客户端\\DFO\\Script.pvf",
+    size: 865854418,
+    modified: "2026-10-21 04:58:12",
+    size_matches: true,
+    newer_than_build: false,
+  },
+  artifacts: [
+    GM_ARTIFACT("items.index.json", "物品库 · gmbuild"),
+    GM_ARTIFACT("gm-growth.json", "成长表 · gmbuild"),
+    GM_ARTIFACT("gm-quests.json", "任务目录 · gmbuild"),
+    GM_ARTIFACT("inventory.current37.json", "背包规则 · 服务端导出"),
+    GM_ARTIFACT("equipment.current37.json", "装备目录 · 服务端导出"),
+    {
+      file: "experience.compat90.json",
+      role: "经验规则 · 服务端导出",
+      present: true,
+      checksum: "",
+      path: "",
+      built_at: "",
+      size: 0,
+    },
+    {
+      file: "names.client.json",
+      role: "名字表 · gmbuild",
+      present: true,
+      checksum: "",
+      path: "",
+      built_at: "",
+      size: 0,
+    },
+    GM_ARTIFACT("equipment.slots.json", "部位表 · gmbuild", ""),
+    GM_ARTIFACT("equipment.jobs.json", "职业限制表 · gmbuild", ""),
+    GM_ARTIFACT("item.rarity.json", "品级表 · gmbuild", ""),
+  ],
+  issues: [{ tone: "ok", text: `三件 GM 产物同源（${GM_CHECKSUM.slice(0, 12)}…），装备目录与背包规则也同源。` }],
+  consistent: true,
+};
+
+/// 行只留几件够点出来的：一件堆叠、一件账号仓库材料、一件时装、一件装备、一件发不了的。
+export const gmItems: GmItemRow[] = [
+  {
+    id: 2002,
+    name: "古老的魔法石",
+    name_en: "Ancient Magicstone",
+    kind: "stackable",
+    grade: 0,
+    rarity: 3,
+    rarity_label: "稀有",
+    level: 0,
+    slot: "",
+    group: "",
+    type_key: "stackable",
+    type_label: "材料",
+    type_text: "[material]",
+    stack_limit: 1000,
+    durability: 0,
+    jobs: null,
+    grantable: true,
+    avatar: false,
+  },
+  {
+    id: 3033,
+    name: "矛盾的碎片",
+    name_en: "Fragment of Conflict",
+    kind: "stackable",
+    grade: 0,
+    rarity: 5,
+    rarity_label: "史诗",
+    level: 0,
+    slot: "",
+    group: "",
+    type_key: "stackable",
+    type_label: "晶体材料",
+    type_text: "[material]",
+    stack_limit: 0,
+    durability: 0,
+    jobs: null,
+    grantable: true,
+    avatar: false,
+  },
+  {
+    id: 5001,
+    name: "上级符咒",
+    name_en: "Superior Enchantment",
+    kind: "stackable",
+    grade: 0,
+    rarity: 1,
+    rarity_label: "普通",
+    level: 0,
+    slot: "",
+    group: "",
+    type_key: "stackable",
+    type_label: "消耗品",
+    type_text: "[throw]",
+    stack_limit: 100,
+    durability: 0,
+    jobs: null,
+    grantable: true,
+    avatar: false,
+  },
+  {
+    // 现网形态的时装：`kind` 仍是 equipment（真产物 676,442 行只有 stackable/equipment 两种值），
+    // 是部位旁表把 slot 覆盖成「时装」的，所以界面与邮件都读 `avatar` 那一格。
+    id: 100200301,
+    name: "冰雪之心的回忆",
+    name_en: "Glacier Heart Memory",
+    kind: "equipment",
+    grade: 0,
+    rarity: 1,
+    rarity_label: "普通",
+    level: 0,
+    slot: "时装",
+    group: "时装",
+    type_key: "时装",
+    type_label: "时装",
+    type_text: "[hat avatar]",
+    stack_limit: 0,
+    durability: 0,
+    jobs: null,
+    grantable: true,
+    avatar: true,
+  },
+  {
+    id: 100050791,
+    name: "荒古遗尘太刀",
+    name_en: "Diluted Bone Katana",
+    kind: "equipment",
+    grade: 0,
+    rarity: 7,
+    rarity_label: "传说",
+    level: 90,
+    slot: "[weapon]",
+    group: "sword",
+    type_key: "weapon",
+    type_label: "武器",
+    type_text: "[weapon]",
+    stack_limit: 0,
+    durability: 35,
+    jobs: ["鬼剑士"],
+    grantable: true,
+    avatar: false,
+  },
+  {
+    id: 10415190,
+    name: "光辉的灵魂",
+    name_en: "Radiant Soul",
+    kind: "stackable",
+    grade: 0,
+    rarity: 5,
+    rarity_label: "史诗",
+    level: 0,
+    slot: "",
+    group: "",
+    type_key: "stackable",
+    type_label: "灵魂材料",
+    type_text: "[material]",
+    stack_limit: 0,
+    durability: 0,
+    jobs: null,
+    grantable: true,
+    avatar: false,
+  },
+  {
+    id: 700001,
+    name: "不认识的盒子",
+    name_en: "Unknown Box",
+    kind: "other",
+    grade: 0,
+    rarity: 0,
+    rarity_label: "普通",
+    level: 0,
+    slot: "",
+    group: "",
+    type_key: "other",
+    type_label: "其它",
+    type_text: null,
+    stack_limit: 0,
+    durability: 0,
+    jobs: null,
+    grantable: false,
+    avatar: false,
+  },
+];
+
+export const gmFacets: GmFacetsView = {
+  types: [
+    { key: "equipment", label: "装备", count: 512345 },
+    { key: "stackable", label: "消耗品/材料", count: 158889 },
+    { key: "avatar", label: "时装", count: 0 },
+    { key: "other", label: "其它", count: 0 },
+  ],
+  slots: [
+    { key: "[weapon]", label: "武器", count: 120000 },
+    { key: "[jacket]", label: "上衣", count: 90000 },
+    { key: "[avatar]", label: "时装", count: 0 },
+  ],
+  rarities: [
+    { key: "1", label: "普通", count: 200000 },
+    { key: "3", label: "稀有", count: 150000 },
+    { key: "5", label: "史诗", count: 90000 },
+    { key: "7", label: "传说", count: 40000 },
+  ],
+  level_bands: [
+    { key: "~20", label: "1–20", count: 80000 },
+    { key: "81-100", label: "81–100", count: 120000 },
+    { key: "116+", label: "116+", count: 4000 },
+  ],
+};
+
+export const gmCharacters: GmCharacter[] = [
+  { id: 10, account_id: 1, username: "probe", name: "剑魂", profession: 0 },
+  { id: 11, account_id: 1, username: "probe", name: "鬼泣", profession: 1 },
+  { id: 12, account_id: 2, username: "kink", name: "气功师", profession: 2 },
+];
+
+/** 存档那列 `created_at` 是微秒时戳，夹具按界面可读的时刻算，别手抄十六位数。 */
+const micros = (text: string) => Date.parse(text) * 1000;
+
+/**
+ * 发放流水夹具：把这张表在界面上会走到的几种形态各摆一笔 ——
+ * 发放本身（`grant`）、带中文对照的管理动作、账号级（没有角色）、服务端自己记的那类
+ * （`operator` 不是 launcher），以及角色查不到名字的那一笔（退回显示角色号）。
+ */
+export const gmGrantLog: GmGrantRecord[] = [
+  {
+    grant_id: "launcher-mvi2xixv-2kindx",
+    account_id: 1,
+    character_id: 10,
+    character_name: "剑魂",
+    action: "grant",
+    operator: "launcher",
+    created_at: micros("2026-10-22T17:40:12"),
+    request:
+      '{"id":"launcher-mvi2xixv-2kindx","account_id":1,"character_id":10,"items":[{"template":15,"amount":1}],"reason":"启动器发放","operator":"launcher"}',
+    receipt:
+      '{"grant":"launcher-mvi2xixv-2kindx","cera_balance":295722,"items":[{"Template":15,"Amount":1,"Slots":[71]}]}',
+  },
+  {
+    grant_id: "launcher-mvgzyaz1-xj56nf",
+    account_id: 1,
+    character_id: 11,
+    character_name: "鬼泣",
+    action: "inventory.amount",
+    operator: "launcher",
+    created_at: micros("2026-10-22T15:02:44"),
+    request:
+      '{"id":"launcher-mvgzyaz1-xj56nf","account_id":1,"character_id":11,"reason":"{\\"action\\":\\"inventory.amount\\",\\"template\\":10418035,\\"amount\\":3}","operator":"launcher"}',
+    receipt: '{"applied":true,"before":{"amount":1},"after":{"amount":3},"revision":"r-8841"}',
+  },
+  {
+    // 只发点券的那一笔可以不带角色：character_id 是 0，界面要写「账号级」而不是「角色 0」。
+    grant_id: "launcher-rehearsal-20261021-a",
+    account_id: 2,
+    character_id: 0,
+    character_name: "",
+    action: "grant",
+    operator: "launcher",
+    created_at: micros("2026-10-21T22:14:09"),
+    request: '{"id":"launcher-rehearsal-20261021-a","account_id":2,"cera":7,"reason":"实机彩排"}',
+    receipt: '{"grant":"launcher-rehearsal-20261021-a","cera_balance":100007}',
+  },
+  {
+    // 服务端建角奖励走的是同一张表：流水号不是 launcher- 前缀，操作者也不是启动器。
+    grant_id: "reward:character_create:newchar.lua:3:cera",
+    account_id: 1,
+    character_id: 0,
+    character_name: "",
+    action: "grant",
+    operator: "reward",
+    created_at: micros("2026-10-19T09:31:57"),
+    request: '{"id":"reward:character_create:newchar.lua:3:cera","account_id":1,"cera":100000}',
+    receipt: '{"cera":295715}',
+  },
+  {
+    grant_id: "launcher-mvf0aaaa-1zqqqq",
+    account_id: 1,
+    character_id: 12,
+    character_name: "",
+    // 对照表里没有的动作键：原样显示，不猜一个中文名。
+    action: "grant_item",
+    operator: "launcher",
+    created_at: micros("2026-10-18T20:05:33"),
+    request: '{"id":"launcher-mvf0aaaa-1zqqqq","account_id":1,"character_id":12,"gold":100000}',
+    receipt: '{"grant":"launcher-mvf0aaaa-1zqqqq","gold_added":100000,"gold_after":11223456}',
+  },
+  {
+    // 邮件发放那一笔：附件先取号、消息号在最后，所以 mail_id 比每个 asset id 都大。
+    grant_id: "launcher-mvf0bbbb-2zqqqq",
+    account_id: 1,
+    character_id: 12,
+    character_name: "剑帝",
+    action: "mail.send",
+    operator: "launcher",
+    created_at: micros("2026-10-20T11:42:08"),
+    request:
+      '{"id":"launcher-mvf0bbbb-2zqqqq","account":1,"character":12,"action":"mail.send","gold":50000,"template":10327301,"amount":20,"body":"补给"}',
+    receipt:
+      '{"action":"mail.send","mail_id":41,"recipient":12,"sender":"GM","body":"补给","gold":50000,"template":10327301,"amount":20,' +
+      '"assets":[{"id":39,"gold":50000},{"id":40,"item":{"stack":{"slot":0,"Template":10327301,"Amount":20,"expire_time":2147483647}}}],' +
+      '"capacity_before":{"messages":12,"unclaimed_assets":3}}',
+  },
+];
+
+/**
+ * 任务列表夹具：把界面上要看的四种形态各摆一条 —— 已完成、可交付（进度已归零）、
+ * 进行中（带「或」分支前置）、被挡住（进度模型不认）。前置那一段是 chip 换行，
+ * 说明那两段是长文本，这两处才是这张卡最容易破的地方。
+ */
+export const gmQuests: GmQuestView = {
+  quests: [
+    {
+      id: 3001,
+      name: "初入班图城",
+      grade: "[epic]",
+      level: 1,
+      status: "completed",
+      progress: 0,
+      description: "前往班图城，向赛莉亚报到。她就在城南的公告板旁边。",
+      condition: "与赛莉亚对话",
+      solve: "赛莉亚会告诉你祭坛的事。",
+      prerequisites: [],
+      can_abandon: false,
+      can_modify: false,
+      can_trace: false,
+      blocked: "",
+    },
+    {
+      id: 3002,
+      name: "沉默的祭坛",
+      grade: "[epic]",
+      level: 12,
+      status: "ready",
+      progress: 0,
+      description: "祭坛已经沉默了很久，需要先确认封印的裂缝在哪儿。",
+      condition: "通关「禁忌的祭坛」地下城 1 次",
+      solve: "回到赛莉亚那里复命。",
+      prerequisites: [[{ id: 3001, name: "初入班图城", completed: true }]],
+      can_abandon: true,
+      can_modify: true,
+      can_trace: true,
+      blocked: "",
+    },
+    {
+      id: 3003,
+      name: "双子巨龙的踪迹",
+      grade: "[epic]",
+      level: 40,
+      status: "accepted",
+      progress: 2,
+      description:
+        "两条巨龙各走各的方向，先追哪一条由玩家在游戏里定；这一段文字故意写得长一些，" +
+        "用来看列表里的截断与 title 全文是不是各说各话。",
+      condition: "通关「双子巨龙巢穴」2 次（还剩 2 次）",
+      solve: "把龙鳞交给班图城的猎人。",
+      prerequisites: [
+        [{ id: 3002, name: "沉默的祭坛", completed: false }],
+        [{ id: 2900, name: "未解析名称 #2900", completed: false }],
+      ],
+      can_abandon: true,
+      can_modify: true,
+      can_trace: true,
+      blocked: "",
+    },
+    {
+      id: 3004,
+      name: "使徒的残响（活动）",
+      grade: "[legend]",
+      level: 60,
+      status: "accepted",
+      progress: 5,
+      description: "活动任务的进度模型还没进产物目录，所以这一行只能看不能改。",
+      condition: "收集使徒残响 20 个",
+      solve: "交给活动管理员。",
+      prerequisites: [],
+      can_abandon: true,
+      can_modify: false,
+      can_trace: false,
+      blocked: "此任务进度暂不支持强制修改",
+    },
+  ],
+  revision: "0f1e2d3c4b5a697889a0b1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60",
+  level: 85,
+  usable: true,
+  unusable_reason: "",
+  source_checksum: "c638346fa77a523a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f30",
+};
+
+/** 一键完成主线那份预览：3 条待补、1 条被互斥挡住、问答取第 1 项。 */
+export const gmQuestPlan: GmQuestPlan = {
+  quests: [3002, 3003, 3100],
+  blocked: [3004],
+  before: [
+    {
+      id: 3002,
+      status: "accepted",
+      progress: 0,
+      config_version: "c638346fa77a523a",
+      progress_model: "single-meet-npc-remaining-v1",
+    },
+  ],
+  level: 85,
+  signature: "9a8b7c6d5e4f30129a8b7c6d5e4f30129a8b7c6d5e4f30129a8b7c6d5e4f3012",
+  answer_picks: { "2001": 0 },
 };

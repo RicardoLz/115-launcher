@@ -75,7 +75,7 @@ pub fn backup_dir(root: &Root) -> PathBuf {
 
 /// 当前库的路径：`local.json` 写了 `sqlite_path` 就以它为准。
 /// `None` 表示这份包还没定下 SQLite 档（没初始化，或写的是别的驱动），此时页面只读不给操作。
-fn current_db(root: &Root) -> Option<PathBuf> {
+pub(crate) fn current_db(root: &Root) -> Option<PathBuf> {
     match config::storage_route_state(root) {
         StorageRoute::Ready { path } => Some(path),
         StorageRoute::NeedsInit | StorageRoute::OtherDriver(_) => None,
@@ -246,19 +246,27 @@ fn stem(path: &Path) -> String {
 }
 
 /// 撞名就补 `-2`、`-3`，绝不覆盖已有的备份。
-fn unique_path(dir: &Path, base: &str, mark: &str) -> PathBuf {
+/// `ext` 交给调用方是因为这同一条规则也要给角色 state 的改前备份用（那是 `.json`，不是整库档）。
+pub(crate) fn unique_backup_path(dir: &Path, base: &str, mark: &str, ext: &str) -> PathBuf {
     for index in 0..100 {
         let tail = if index == 0 {
             String::new()
         } else {
             format!("-{}", index + 1)
         };
-        let path = dir.join(format!("{base}{mark}-{}{tail}.sqlite3", stamp()));
+        let path = dir.join(format!("{base}{mark}-{}{tail}.{ext}", stamp()));
         if !path.exists() {
             return path;
         }
     }
-    dir.join(format!("{base}{mark}-{}.sqlite3", stamp()))
+    dir.join(format!("{base}{mark}-{}.{ext}", stamp()))
+}
+
+/// 角色 state 的改前备份落点：整库备份目录下的 `state/` 子目录。
+/// 不跟整库档平铺在同一处，是因为 `list_backups` 按 `.sqlite3` 认「能替换回去的档」——
+/// 一份单角色 JSON 混进那张列表里，看起来就像一份可用的整库备份，那是误导。
+pub fn role_state_backup_dir(root: &Root) -> PathBuf {
+    backup_dir(root).join("state")
 }
 
 /// 只读连接做 `VACUUM INTO`，所以服务端正开着也能拿到已提交的那一面。
@@ -396,7 +404,7 @@ pub fn backup(root: &Root) -> Result<String, String> {
     }
     let dir = backup_dir(root);
     std::fs::create_dir_all(&dir).map_err(|err| format!("创建 {} 失败：{err}", dir.display()))?;
-    let target = unique_path(&dir, &stem(&db), "");
+    let target = unique_backup_path(&dir, &stem(&db), "", "sqlite3");
     let ok = match vacuum_into(&db, &target) {
         Ok(()) => audit(&target),
         Err(err) => {
@@ -447,7 +455,7 @@ pub fn restore(root: &Root, candidate_raw: &str) -> Result<String, String> {
         audit(&db).map_err(|err| format!("当前存档体检没过，不敢替换：{err}"))?;
         let dir = backup_dir(root);
         std::fs::create_dir_all(&dir).map_err(|err| format!("创建 {} 失败：{err}", dir.display()))?;
-        let target = unique_path(&dir, &stem(&db), "-replaced");
+        let target = unique_backup_path(&dir, &stem(&db), "-replaced", "sqlite3");
         match vacuum_into(&db, &target) {
             Ok(()) => Some(target),
             Err(err) => {
@@ -662,11 +670,45 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dfo-saves-uniq-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("临时目录");
-        let first = unique_path(&dir, "dfolan", "");
+        let first = unique_backup_path(&dir, "dfolan", "", "sqlite3");
         std::fs::write(&first, b"x").expect("占位");
-        let second = unique_path(&dir, "dfolan", "");
+        let second = unique_backup_path(&dir, "dfolan", "", "sqlite3");
         let _ = std::fs::remove_dir_all(&dir);
         assert_ne!(first, second);
+    }
+
+    /// 落点必须是整合包那个 `backup/` 底下的 `state/`：整库档已经实证写得进去（存档页那一枚），
+    /// 这一层只是它旁边的一个子目录，不另起炉灶。
+    #[test]
+    fn role_state_backups_land_under_the_backup_dir() {
+        let root = Root {
+            path: PathBuf::from("pack"),
+            source: "test",
+        };
+        let dir = role_state_backup_dir(&root);
+        assert_eq!(dir, backup_dir(&root).join("state"));
+        assert_eq!(
+            dir,
+            PathBuf::from("pack/server/work/dfo-lan/runtime/storage/backup/state")
+        );
+    }
+
+    /// `state/` 里的改前原文不许冒充「能替换回去的整库档」：列表按 `.sqlite3` 认，
+    /// 删除按钮的白名单也按 `.sqlite3` 认，所以那两份 JSON 两边都够不到。
+    #[test]
+    fn state_backups_are_invisible_to_the_database_backup_list() {
+        let (root, dir) = temp_root("state-vs-list");
+        let state = role_state_backup_dir(&root);
+        std::fs::create_dir_all(&state).expect("state 目录");
+        let sample = state.join("role-1-10-20261022-191500.json");
+        std::fs::write(&sample, b"{\"level\":1}").expect("一份改前原文");
+
+        let listed = list_backups(&root, None);
+        assert_eq!(listed.len(), 0, "整库备份列表里出现了 state 里的 JSON");
+        assert!(delete_backup(&root, &sample.display().to_string()).is_err(), "删除按钮够不到 JSON 才对");
+        assert!(sample.is_file(), "被拒的删除不许把改前原文带走");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 删除只建立在「`backup/` 底下那一层」这条路径契约上，用临时包验，不碰整合包。

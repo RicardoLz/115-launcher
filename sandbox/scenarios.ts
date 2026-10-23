@@ -342,4 +342,21 @@ scenario("页面", "scheme.amber", "配色回琥珀", "在设置页点回琥珀�
   click('.scheme[data-scheme="amber"]');
 });
 
+scenario("GM", "gm.write", "GM：存档可写", "发放目标卡绿点，选角色后能按下发放", () => {
+  reset();
+  st.gm_lock = "none";
+});
+scenario("GM", "gm.server", "GM：服务端占用", "发放按钮锁死，把那句提示原样显示出来", () => {
+  reset();
+  st.gm_lock = "server";
+});
+scenario("GM", "gm.busy", "GM：管理操作中", "另一项写档在跑，chip 显示占用", () => {
+  reset();
+  st.gm_lock = "busy";
+});
+scenario("GM", "gm.none", "GM：还没有存档", "没建过库，chip 报错并说明原因", () => {
+  reset();
+  st.gm_lock = "missing";
+});
+
 export const scenarios = S;

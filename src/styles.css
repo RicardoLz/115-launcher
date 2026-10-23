@@ -1313,6 +1313,20 @@ body {
   border-color: var(--accent-deep);
 }
 
+/* GM 页那八张卡：正文这一层自己滚（横竖都要），标题栏不参与滚动。
+   停靠之后格子可能很窄，而背包 / 结果 / 任务这几张卡里是宽表格：
+   让正文自己出滚动条，section.card 的 scrollWidth 才等于 clientWidth —— 这正是沙盒那条
+   「卡片溢出」探针量的东西，窄栏下不该再顶破卡片。 */
+.gm-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+}
+
 /* 右侧摆放栏：收起的面板在这儿排成一列胶囊。整栏刻意做窄，不跟停靠树抢地方。 */
 .pill-tray {
   display: flex;
@@ -1753,6 +1767,11 @@ input[type="text"]:focus {
   color: var(--err-ink);
 }
 
+/* 代际漂移这一类「能用但不该忽略」的提醒：比正常浅一档，比正文显眼。 */
+.hint[data-tone="warn"] {
+  color: var(--warn-ink);
+}
+
 /* ------------------------------------------------------------------ 弹层 */
 
 .scrim {
@@ -2086,6 +2105,14 @@ pre.evidence {
   font-size: 11.5px;
   color: var(--text-dim);
   white-space: nowrap;
+}
+
+/* 一长串 id（任务范围、待放弃清单）要能在窄栏里换行：上面那条 nowrap 是给单元格用的。 */
+.mono-wrap {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
 }
 
 /* 面板正文：标题栏不跟着滚，设置与实况两块各自成一段。 */
@@ -2597,7 +2624,8 @@ pre.evidence {
 /* 裸 select 与数字格：连发条目要在同一行里排开，不能沿用反馈页那种整宽控件。 */
 .af-entry select,
 .af-cell select,
-.num input {
+.num input,
+.af-live input {
   padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2609,9 +2637,25 @@ pre.evidence {
 
 .af-entry select:focus,
 .af-cell select:focus,
-.num input:focus {
+.num input:focus,
+.af-live input:focus {
   outline: none;
   border-color: var(--accent-deep);
+}
+
+/* 仓库表里那一格「改成」：数字与 mono 同族，宽度跟着表头走，不撑破列。 */
+.af-live input[type="number"] {
+  width: 84px;
+  font-family: var(--mono);
+}
+
+/* 勾选列：复选框用原生尺寸。上面那 84px 是给数字格的，套到复选框上能把整列顶宽一倍。 */
+.af-live input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: var(--accent);
 }
 
 .num input {
@@ -2708,6 +2752,23 @@ pre.evidence {
   font-family: var(--mono);
   text-align: right;
   color: var(--accent-ink);
+}
+
+/* 任务表待在前窄栏里：前置名与说明必须能换行，否则一枚 nowrap 的 chip 就把整张表顶出卡片。 */
+.af-live--quests td {
+  overflow-wrap: anywhere;
+}
+
+.af-live--quests .chip {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+/* 展开的说明跟着左对齐，不沿用末列那套 mono/右对齐。 */
+.af-live--quests td:last-child {
+  text-align: left;
+  font-family: var(--sans);
 }
 
 /* ------------------------------------------------------------------ 存档页 */

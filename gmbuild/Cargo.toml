@@ -1,0 +1,59 @@
+[package]
+name = "gmbuild"
+version = "0.1.0"
+edition = "2021"
+# bin 全部显式声明（见下方 required-features），关掉自动发现以免重复目标。
+autobins = false
+
+[features]
+# 默认带 build：离线构建器（bin + PVF 内核）照旧可用。
+# 启动器以 default-features = false 依赖本 crate 时，只链入纯 JSON 读取器
+# （gmindex / gojson / path），flate2、encoding_rs、rsa 这些重依赖完全不进来。
+default = ["build"]
+build = [
+    "dep:flate2",
+    "dep:encoding_rs",
+    "dep:aes",
+    "dep:cbc",
+    "dep:cipher",
+    "dep:rsa",
+    "dep:pem",
+    "dep:sha2",
+    "dep:chrono",
+]
+
+[[bin]]
+name = "gmbuild"
+path = "src/main.rs"
+required-features = ["build"]
+
+[[bin]]
+name = "probe_item"
+path = "src/bin/probe_item.rs"
+required-features = ["build"]
+
+[[bin]]
+name = "probe_text"
+path = "src/bin/probe_text.rs"
+required-features = ["build"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+flate2 = { version = "1", optional = true }
+encoding_rs = { version = "0.8", optional = true }
+aes = { version = "0.8", optional = true }
+cbc = { version = "0.1", features = ["std", "block-padding"], optional = true }
+cipher = { version = "0.4", optional = true }
+rsa = { version = "0.9", optional = true }
+pem = { version = "3", optional = true }
+sha2 = { version = "0.10", optional = true }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+], optional = true }
+
+[[bin]]
+name = "probe_chr"
+path = "src/bin/probe_chr.rs"
+required-features = ["build"]

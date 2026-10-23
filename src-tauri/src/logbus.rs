@@ -107,11 +107,25 @@ impl Bus {
         let start = ring.len().saturating_sub(limit);
         ring.iter().skip(start).cloned().collect()
     }
+
+    /// 只发给界面的进度事件：不进环形、不落盘。
+    ///
+    /// 重建一次能打出几百行 `进度 n/m`，走 `push` 的话日志被刷满、真正的告警行会被挤出
+    /// 那 2000 格；而进度条是瞬时状态，重启后没有任何回看价值，所以给它单独一条 emit。
+    pub fn progress(&self, payload: &impl Serialize) {
+        emit_value(&locked(&self.app), "gm-rebuild-progress", payload);
+    }
 }
 
 fn emit(slot: &MutexGuard<Option<AppHandle>>, line: &Line) {
     if let Some(app) = slot.as_ref() {
         let _ = app.emit("log", line);
+    }
+}
+
+fn emit_value(slot: &MutexGuard<Option<AppHandle>>, event: &str, payload: &impl Serialize) {
+    if let Some(app) = slot.as_ref() {
+        let _ = app.emit(event, payload);
     }
 }
 

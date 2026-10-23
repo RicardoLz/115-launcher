@@ -305,14 +305,14 @@ export const cases: Case[] = [
     ],
   },
   {
-    // 侧栏这一轮改了两处：多一枚 GM工具图标（空页走 .blank 兜底），高亮从「各项各自变色」
+    // 侧栏这一轮改了两处：多一枚 GM工具图标（那页现在是物品库查询 + 发放目标），高亮从「各项各自变色」
     // 改成一枚会滑的胶囊。gap 是胶囊矩形减当前项矩形的左上角差，跟得上就是 [0,0]。
     name: "J02 侧栏：GM工具空页与高亮胶囊跟到当前项",
     scenario: "worst.normal",
     kind: "self",
     steps: [
       { do: "rail", label: "GM工具" },
-      { do: "shot", label: "GM 空页" },
+      { do: "shot", label: "GM 页" },
       { do: "rail", label: "设置" },
       { do: "shot", label: "胶囊滑到设置" },
       { do: "rail", label: "开发者" },
@@ -453,6 +453,96 @@ export const cases: Case[] = [
       { do: "click", sel: '.tray-pill[data-panel="mods"]' },
       { do: "dock", leaves: ["mode", "modkit", "memory", "log", "mods"], pills: [] },
       { do: "shot", label: "再收起再归位" },
+      { do: "rail", label: "主页" },
+    ],
+  },
+  {
+    // GM 页与开发者页共用同一套停靠层：九张卡的默认摆法、收起成胶囊、点胶囊接回末尾。
+    // 这里钉的是 GM_KEYS 的登记顺序 —— 摆法可以随便拖，栏里没有自己的状态，全靠树推出来。
+    name: "K04 GM 页：九张卡可摆放、收起成胶囊、点胶囊归位",
+    scenario: "gm.write",
+    kind: "self",
+    remount: true,
+    steps: [
+      { do: "rail", label: "GM工具" },
+      {
+        do: "dock",
+        leaves: [
+          "search",
+          "results",
+          "target",
+          "detail",
+          "bag",
+          "stats",
+          "quests",
+          "materials",
+          "records",
+        ],
+        pills: [],
+        tray: true,
+      },
+      { do: "shot", label: "GM 九张卡铺开，栏是空的" },
+      { do: "click", sel: '.panel[data-panel="materials"] [data-act="collapse"]' },
+      {
+        do: "dock",
+        leaves: ["search", "results", "target", "detail", "bag", "stats", "quests", "records"],
+        pills: ["materials"],
+      },
+      { do: "shot", label: "收起仓库：栏里一枚胶囊" },
+      { do: "click", sel: '.panel[data-panel="search"] [data-act="collapse"]' },
+      {
+        do: "dock",
+        leaves: ["results", "target", "detail", "bag", "stats", "quests", "records"],
+        pills: ["search", "materials"],
+      },
+      { do: "click", sel: '.tray-pill[data-panel="materials"]' },
+      {
+        do: "dock",
+        leaves: [
+          "results",
+          "target",
+          "detail",
+          "bag",
+          "stats",
+          "quests",
+          "records",
+          "materials",
+        ],
+        pills: ["search"],
+      },
+      { do: "shot", label: "点胶囊归位：接在末尾" },
+      { do: "click", sel: '.tray-pill[data-panel="search"]' },
+      {
+        do: "dock",
+        leaves: [
+          "results",
+          "target",
+          "detail",
+          "bag",
+          "stats",
+          "quests",
+          "records",
+          "materials",
+          "search",
+        ],
+        pills: [],
+      },
+      // 摆法挂在 App 上（和开发者页同一个口径）：换页回来还得是收起来的那一枚。
+      { do: "click", sel: '.panel[data-panel="stats"] [data-act="collapse"]' },
+      {
+        do: "dock",
+        leaves: ["results", "target", "detail", "bag", "quests", "records", "materials", "search"],
+        pills: ["stats"],
+      },
+      { do: "rail", label: "主页" },
+      { do: "rail", label: "GM工具" },
+      {
+        do: "dock",
+        leaves: ["results", "target", "detail", "bag", "quests", "records", "materials", "search"],
+        pills: ["stats"],
+      },
+      { do: "shot", label: "换页回来：摆法还在" },
+      { do: "click", sel: '.tray-pill[data-panel="stats"]' },
       { do: "rail", label: "主页" },
     ],
   },

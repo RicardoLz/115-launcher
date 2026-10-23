@@ -16,6 +16,16 @@ dist-ssr
 src-tauri/target
 src-tauri/gen/schemas
 
+# 本机生成物与探针落盘：GM 产物、PVF/GBK 对照 CSV、台架截图，可由源码重建，绝不入库
+/out/
+/_scratch/
+/scripts-tmp/
+/sandbox/run/shots/
+gmbuild/target/
+gmbuild/out/
+probe/**/target/
+probe/**/*.csv
+
 # 本机工具状态与临时产物
 .qoder/
 .qoder-scratch/

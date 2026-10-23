@@ -482,6 +482,398 @@ export interface MemoryLive {
   note: string;
 }
 
+/** GM 物品库（方案 C）：读 gmbuild 离线产物，运行期不碰 PVF。 */
+export interface GmTableInfo {
+  present: boolean;
+  entries: number;
+  source: string;
+  built_at: string;
+}
+
+export interface GmCatalogStatus {
+  dir: string;
+  items_source: string;
+  count: number;
+  equipment: number;
+  stackable: number;
+  slots: GmTableInfo;
+  jobs: GmTableInfo;
+  rarity: GmTableInfo;
+  names: GmTableInfo;
+}
+
+export interface GmStatusView {
+  stage: string;
+  error: string;
+  dir: string;
+  catalog: GmCatalogStatus | null;
+}
+
+/** 一件 GM 产物：代际指纹来自产物自己记的 `source`。 */
+export interface GmArtifact {
+  file: string;
+  role: string;
+  present: boolean;
+  checksum: string;
+  /** 产物里记的来源名（`Script.pvf` / `Script.inner.pvf`）。 */
+  path: string;
+  built_at: string;
+  /** 产物记录的那份来源文件多大；0 = 没记。 */
+  size: number;
+}
+
+/** 同源校验的一条结论：`err` 会让写链路整条拒，`warn` 只是代际漂移。 */
+export interface GmAuditIssue {
+  tone: "ok" | "warn" | "err";
+  text: string;
+}
+
+/** 现场那份 Script.pvf：只比大小与时间，不做哈希。 */
+export interface GmPvfNow {
+  path: string;
+  size: number;
+  modified: string;
+  size_matches: boolean;
+  newer_than_build: boolean;
+}
+
+export interface GmAudit {
+  dir: string;
+  pvf_path: string;
+  pvf: GmPvfNow | null;
+  artifacts: GmArtifact[];
+  issues: GmAuditIssue[];
+  /** 三件 gmbuild 产物是否同一次构建。 */
+  consistent: boolean;
+}
+
+export interface GmRebuildStep {
+  step: string;
+  ok: boolean;
+  seconds: number;
+  detail: string;
+}
+
+/** 一键重建的进度：只走 `gm-rebuild-progress` 事件，不进运行日志。 */
+export interface GmRebuildProgress {
+  step: string;
+  /** 1 起算的那一步。 */
+  step_index: number;
+  step_total: number;
+  /** 整轮的总进度，不是单步的。 */
+  percent: number;
+  text: string;
+}
+
+export interface GmRebuildReport {
+  dir: string;
+  pvf: string;
+  /** 新产物共用的归档校验（GM 三件 + 装备目录 + 背包规则戳）。 */
+  checksum: string;
+  steps: GmRebuildStep[];
+  /** 被替换的旧产物备份目录；空串 = 原来没有可备份的。 */
+  backup: string;
+  elapsed: number;
+  audit: GmAudit;
+}
+
+export interface GmItemRow {
+  id: number;
+  name: string;
+  name_en: string;
+  kind: string;
+  grade: number;
+  rarity: number;
+  rarity_label: string;
+  level: number;
+  slot: string;
+  group: string;
+  type_key: string;
+  type_label: string;
+  type_text: string | null;
+  stack_limit: number;
+  durability: number;
+  jobs: string[] | null;
+  grantable: boolean;
+  /** 时装（服务端 `special_equipment` 容器 1 那一族）。判据住在 Rust 的 `GmItem::avatar()`，前端不复制规则。 */
+  avatar: boolean;
+}
+
+export interface GmFacet {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface GmFacetsView {
+  types: GmFacet[];
+  slots: GmFacet[];
+  rarities: GmFacet[];
+  level_bands: GmFacet[];
+}
+
+export interface GmSearchResult {
+  total: number;
+  items: GmItemRow[];
+}
+
+export interface GmQuery {
+  q: string;
+  type_?: string;
+  slot?: string;
+  level_min?: number;
+  level_max?: number;
+  rarity?: number | null;
+  limit?: number;
+  offset?: number;
+}
+
+/** 发放前必读：存档是否可写（服务端租约 + 本机管理锁）。 */
+export interface GmInventoryStatus {
+  editable: boolean;
+  server_running: boolean;
+  management_busy: boolean;
+  message: string;
+  db_path: string;
+}
+
+export interface GmCharacter {
+  id: number;
+  account_id: number;
+  username: string;
+  name: string;
+  profession: number;
+}
+
+export interface GmGrantItem {
+  template: number;
+  amount: number;
+}
+
+/** 角色详情头部：职业名由客户端职业名表推导，不直接读 profession。 */
+export interface GmCharacterHead {
+  id: number;
+  account_id: number;
+  wire_id: number;
+  name: string;
+  profession: number;
+  class_name: string;
+  advancement: number;
+  awakening: number;
+  level: number;
+  experience: number;
+  gold: number;
+  created_at: string;
+}
+
+/** 存档里那份概览：缺键按零值，属性/技能原样透传。 */
+export interface GmCharacterSummary {
+  level: number;
+  experience: number;
+  skill_points: [number, number];
+  technique_points: [number, number];
+  currency_slot2: number;
+  advancement: number;
+  awakening: number;
+  /** 原生装备栏标志：bit0 辅助装备、bit1 魔法石、bit4 耳环。 */
+  equipment_slot_flags: number;
+  attributes: unknown;
+  learned_skills: unknown;
+  skill_slots: unknown;
+}
+
+/** 一行的 revision 是编辑用的乐观锁令牌（只读浏览时只展示）。 */
+export interface GmBagRow {
+  collection: string;
+  space: number;
+  slot: number;
+  group: number;
+  template: number;
+  name: string;
+  count: number;
+  worn: boolean;
+  revision: string;
+  can_edit_count: boolean;
+  stack_limit?: number;
+  /** 装备两张表（`equipment` / `worn`）那一行的当前耐久；没有这一键就不是装备行。 */
+  durability?: number;
+  kind?: string;
+  type_label?: string;
+  rarity: number;
+  rarity_label?: string;
+  level: number;
+}
+
+export interface GmCharacterDetail {
+  character: GmCharacterHead;
+  cera: number;
+  summary: GmCharacterSummary;
+  bag: GmBagRow[];
+  bag_error: string;
+}
+
+export interface GmGrantOutcome {
+  applied: boolean;
+  grant_id: string;
+  message: string;
+  note: string;
+  receipt: unknown;
+}
+
+/** 发放流水一行：只读服务端那张 `admin_grants` 审计表，最近 100 笔，新的在前。 */
+export interface GmGrantRecord {
+  grant_id: string;
+  account_id: number;
+  /** 0 = 这一笔是账号级的（只发点券可以不选角色）。 */
+  character_id: number;
+  /** 角色改名/删号或这一笔没角色时是空串，界面退回显示角色号。 */
+  character_name: string;
+  /** 管理动作的名字；发放笔写 "grant"。 */
+  action: string;
+  operator: string;
+  /** 存档里的微秒时戳，格式化归界面。 */
+  created_at: number;
+  request: string;
+  receipt: string;
+}
+
+/** 账号晶体仓库的一格：槽位 + 模板 + 名称（查不到时是「材料 N」）+ 当前数量。 */
+export interface GmMaterialRow {
+  slot: number;
+  template: number;
+  name: string;
+  amount: number;
+}
+
+/** 一次管理操作。revision / expected_amount / template 是背包编辑的乐观锁三件套。 */
+export interface GmManageInput {
+  action:
+    | "inventory.amount"
+    | "inventory.delete"
+    | "equipment.durability"
+    | "materials.set"
+    | "mail.send"
+    | "sp"
+    | "tp"
+    | "sp.recalculate"
+    | "equipment.unlock"
+    | "level"
+    | "advancement"
+    | "awakening"
+    | "profession"
+    | "quests.ready"
+    | "quests.complete"
+    | "quests.abandon"
+    | "quests.mainline"
+    | "quests.prerequisites";
+  id: string;
+  account: number;
+  character: number;
+  template?: number;
+  amount?: number;
+  expected_amount?: number | null;
+  /** `equipment.durability` 的第三把钥匙：界面读到的当前耐久。装备行的数量不是用户看的字段，所以不跟 `expected_amount` 混用。 */
+  expected_durability?: number | null;
+  reason?: string;
+  revision?: string;
+  collection?: string;
+  space?: number;
+  slot?: number;
+  group?: number;
+  /** 只有 `profession`（转职分支一步到位）带它，其余动作不写这一键。 */
+  stage?: number | null;
+  /** `quests.*` 点名的任务 id（1 至 100 个）。 */
+  quests?: number[];
+  /** `quests.mainline` 的目标等级：1 至角色当前等级。 */
+  level?: number;
+  /** 计划类动作（`quests.mainline` / `quests.prerequisites`）带来预览算出的签名。 */
+  plan?: string;
+  /** `mail.send` 的金币附件（0 = 不带金币）。与发放里「直接进背包」的那笔金币是两回事。 */
+  gold?: number;
+  /** `mail.send` 的正文。上限 512 字节，就是 `character_mail.body` 的那条 CHECK。 */
+  body?: string;
+}
+
+/** 换分支可选：分支号、由客户端职业名表推导的显示名、该分支能走的觉醒阶段（0 恒在首位）。 */
+export interface GmBranchOption {
+  branch: number;
+  name: string;
+  stages: number[];
+}
+
+/** 「角色数值改写」卡片打开时读一次：当前等级/经验/转职/觉醒 + 可选分支。 */
+export interface GmGrowOptions {
+  level: number;
+  experience: number;
+  level_cap: number;
+  advancement: number;
+  awakening: number;
+  /** 升到下一级还要多少经验；已在满级时为 0。 */
+  next_level_experience: number;
+  branches: GmBranchOption[];
+  /** 这次写的是哪一份离线构建（gm-growth.json 的归档校验）。 */
+  source_checksum: string;
+  profession: number;
+  class_name: string;
+}
+
+/** 库里一行任务的原样：`before` 用它把改前的状态整份记进审计。 */
+export interface GmQuestRowState {
+  id: number;
+  status: string;
+  progress: number;
+  config_version: string;
+  progress_model: string;
+}
+
+/** 一条前置：组内是「必须全部完成」，组与组之间是可选分支。 */
+export interface GmQuestPre {
+  id: number;
+  name: string;
+  completed: boolean;
+}
+
+/** 列表里的一行：`status` 可能是 `ready`（进度已够、只差提交），`blocked` 非空即不可改。 */
+export interface GmQuestRow {
+  id: number;
+  name: string;
+  /** `[grade]` 段原文，`[epic]` 就是主线。 */
+  grade: string;
+  level: number;
+  status: string;
+  progress: number;
+  description: string;
+  condition: string;
+  solve: string;
+  prerequisites: GmQuestPre[][];
+  can_abandon: boolean;
+  can_modify: boolean;
+  can_trace: boolean;
+  blocked: string;
+}
+
+export interface GmQuestView {
+  quests: GmQuestRow[];
+  /** 逐任务改写的乐观锁：界面带着它提交，库里变了就整笔拒。 */
+  revision: string;
+  /** 角色当前等级：一键完成主线的目标等级上限。 */
+  level: number;
+  usable: boolean;
+  unusable_reason: string;
+  source_checksum: string;
+}
+
+/** 一键完成的范围：`signature` 必须原样带回执行，变了就得重新预览。 */
+export interface GmQuestPlan {
+  quests: number[];
+  blocked: number[];
+  before: GmQuestRowState[];
+  level: number;
+  signature: string;
+  /** 「哪个问答任务选了第几个答案」：被答案门挡掉的分支要在界面上说清楚。 */
+  answer_picks?: Record<string, number>;
+}
+
 export const commands = {
   appInfo: () => invoke<AppInfo>("app_info"),
   logSnapshot: (limit = 600) => invoke<LogLine[]>("log_snapshot", { limit }),
@@ -537,6 +929,57 @@ export const commands = {
   memoryConfig: () => invoke<MemoryConfig>("memory_config"),
   memorySave: (tuning: MemoryTuning) => invoke<ActionRecord>("memory_save", { tuning }),
   memoryLive: () => invoke<MemoryLive | null>("memory_live"),
+  gmStatus: () => invoke<GmStatusView>("gm_status"),
+  gmReload: () => invoke<void>("gm_reload"),
+  gmAudit: () => invoke<GmAudit>("gm_audit"),
+  gmRebuild: (pvf?: string) => invoke<GmRebuildReport>("gm_rebuild", { pvf: pvf ?? null }),
+  gmPickPvf: () => invoke<string | null>("gm_pick_pvf"),
+  gmSearch: (query: GmQuery) =>
+    invoke<GmSearchResult>("gm_search", {
+      query: query.q,
+      type_: query.type_ ?? "",
+      slot: query.slot ?? "",
+      level_min: query.level_min ?? 0,
+      level_max: query.level_max ?? 0,
+      rarity: query.rarity ?? null,
+      limit: query.limit ?? 0,
+      offset: query.offset ?? 0,
+    }),
+  gmItem: (id: number) => invoke<GmItemRow>("gm_item", { id }),
+  gmFacets: () => invoke<GmFacetsView>("gm_facets"),
+  gmInventoryStatus: () => invoke<GmInventoryStatus>("gm_inventory_status"),
+  gmCharacters: () => invoke<GmCharacter[]>("gm_characters"),
+  gmCharacterDetail: (account: number, character: number) =>
+    invoke<GmCharacterDetail>("gm_character_detail", { account, character }),
+  gmGrant: (grant: {
+    id: string;
+    account: number;
+    character?: number;
+    gold?: number;
+    cera?: number;
+    items?: GmGrantItem[];
+    reason?: string;
+  }) =>
+    invoke<GmGrantOutcome>("gm_grant", {
+      id: grant.id,
+      account: grant.account,
+      character: grant.character ?? 0,
+      gold: grant.gold ?? 0,
+      cera: grant.cera ?? 0,
+      items: grant.items ?? [],
+      reason: grant.reason ?? "",
+    }),
+  gmMaterials: (account: number) => invoke<GmMaterialRow[]>("gm_materials", { account }),
+  gmGrantLog: () => invoke<GmGrantRecord[]>("gm_grant_log"),
+  gmGrowthOptions: (account: number, character: number) =>
+    invoke<GmGrowOptions>("gm_growth_options", { account, character }),
+  gmManage: (input: GmManageInput) => invoke<GmGrantOutcome>("gm_manage", { input }),
+  gmQuests: (account: number, character: number) =>
+    invoke<GmQuestView>("gm_quests", { account, character }),
+  gmQuestPreviewMainline: (account: number, character: number, level: number) =>
+    invoke<GmQuestPlan>("gm_quest_preview_mainline", { account, character, level }),
+  gmQuestPreviewPrerequisites: (account: number, character: number, target: number) =>
+    invoke<GmQuestPlan>("gm_quest_preview_prerequisites", { account, character, target }),
   serverUpdateCheck: () => invoke<ServerUpdateCheck>("server_update_check"),
   serverUpdateApply: () => invoke<ActionRecord>("server_update_apply"),
   selfUpdateCheck: () => invoke<SelfUpdateCheck>("self_update_check"),
@@ -572,6 +1015,8 @@ export const events = {
     listen<ServerUpdateCheck>("server-update-available", (e) => handler(e.payload)),
   onUpdateProgress: (handler: (progress: UpdateProgress) => void) =>
     listen<UpdateProgress>("update-progress", (e) => handler(e.payload)),
+  onGmRebuildProgress: (handler: (progress: GmRebuildProgress) => void) =>
+    listen<GmRebuildProgress>("gm-rebuild-progress", (e) => handler(e.payload)),
 };
 
 export const PHASE_LABEL: Record<Phase, string> = {

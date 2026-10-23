@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import BackgroundLayer from "./components/BackgroundLayer";
 import GlassDefs from "./components/GlassDefs";
+import GmPage from "./components/GmPage";
 import Dock from "./components/Dock";
 import FeedbackPage, { type FeedbackTab } from "./components/FeedbackPage";
 import LaunchDock, { type UpdateArm } from "./components/LaunchDock";
@@ -15,7 +16,7 @@ import ToolsPage from "./components/ToolsPage";
 import { PANELS } from "./components/panels";
 import { HealthSheet, PortsSheet } from "./components/ReportSheet";
 import WindowControls from "./components/WindowControls";
-import { DEFAULT_DOCK, leaves, place, type DockNode, type PanelKey, type Zone } from "./dock";
+import { DEFAULT_DOCK, DEFAULT_GM_DOCK, leaves, place, type DockNode, type GmKey, type PanelKey, type Zone } from "./dock";
 import { useGlideScroll } from "./glide";
 import { useTheme } from "./theme";
 import {
@@ -65,6 +66,9 @@ export default function App() {
   // 更新日志合成一张卡，靠这页签切「客户端 / 启动器」。
   const [logTab, setLogTab] = useState<"client" | "launcher">("client");
   const [dock, setDock] = useState<DockNode | null>(DEFAULT_DOCK);
+  /// GM 页九张卡的摆法和上面那棵同样是「会话内记得住」：挂在 App 上，
+  /// 换页回来还是玩家摆好的样子（开发者页一直是这个口径）。
+  const [gmDock, setGmDock] = useState<DockNode<GmKey> | null>(DEFAULT_GM_DOCK);
   const [floating, setFloating] = useState<Record<PanelKey, boolean>>({
     log: false,
     mode: false,
@@ -587,6 +591,8 @@ export default function App() {
               <FeedbackPage tab={feedbackTab} onTab={setFeedbackTab} onNotice={flash} />
             ) : page === "mods" ? (
               <ModsPage phase={status.phase} onNotice={flash} />
+            ) : page === "gm" ? (
+              <GmPage onNotice={flash} dock={gmDock} setDock={setGmDock} />
             ) : page === "dev" ? (
               <Dock
                 node={dock}

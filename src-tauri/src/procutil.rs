@@ -5,7 +5,7 @@
 
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 pub const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -264,7 +264,13 @@ pub fn run_capture(program: &Path, args: &[&str], timeout: Duration) -> Result<S
 }
 
 /// 已经配好参数/工作目录/环境变量的命令，收输出并带超时。
-pub fn run_capture_with(mut cmd: Command, timeout: Duration) -> Result<String, String> {
+pub fn run_capture_with(cmd: Command, timeout: Duration) -> Result<String, String> {
+    run_with_status(cmd, timeout).map(|(_, text)| text)
+}
+
+/// 同 `run_capture_with`，但当「跑完了」还不够、还要知道它成没成时用这个：
+/// 返回 `(退出码是否为零, 输出)`。超时与被信号打断仍然算 `Err`。
+pub fn run_with_status(mut cmd: Command, timeout: Duration) -> Result<(bool, String), String> {
     let label = cmd.get_program().to_string_lossy().into_owned();
     cmd.stdin(Stdio::null());
     let child = cmd
@@ -281,7 +287,7 @@ pub fn run_capture_with(mut cmd: Command, timeout: Duration) -> Result<String, S
         Ok(Ok(output)) => {
             let mut text = String::from_utf8_lossy(&output.stdout).to_string();
             text.push_str(&String::from_utf8_lossy(&output.stderr));
-            Ok(text)
+            Ok((output.status.success(), text))
         }
         Ok(Err(err)) => Err(format!("{label} 执行失败：{err}")),
         Err(_) => {
@@ -289,4 +295,91 @@ pub fn run_capture_with(mut cmd: Command, timeout: Duration) -> Result<String, S
             Err(format!("{label} 超时（{} 秒）", timeout.as_secs()))
         }
     }
+}
+
+/// 流式版 `run_with_status`：子进程每吐一行就回调一次，跑完仍返回 `(是否成功, stdout+stderr)`。
+///
+/// 为什么要另开一条路：重建要在界面上走出进度，而 `wait_with_output` 是等子进程整个跑完才
+/// 一次性吐输出，进度条就会「90 秒一动不动，然后一下全绿」。
+/// 两路输出各收各的、最后照 stdout、stderr 的顺序拼，所以 `detail` 那份尾巴与上面那条一致。
+pub fn run_with_lines(
+    mut cmd: Command,
+    timeout: Duration,
+    mut on_line: impl FnMut(&str),
+) -> Result<(bool, String), String> {
+    enum Msg {
+        Line { stream: u8, text: String },
+        Done(Result<bool, std::io::Error>),
+    }
+    use std::io::{BufRead, Read};
+
+    let label = cmd.get_program().to_string_lossy().into_owned();
+    cmd.stdin(Stdio::null());
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("无法启动 {label}：{err}"))?;
+    let pid = child.id();
+    let stdout = child.stdout.take().expect("stdout 已 piped");
+    let stderr = child.stderr.take().expect("stderr 已 piped");
+
+    let (tx, rx) = std::sync::mpsc::channel::<Msg>();
+    // 三条线程共用一条通道，主线程只认「三个发送端都掉了」：那一刻拿到的才是完整输出。
+    // 自己这一份必须先丢掉，否则永远断不了。
+    let readers: Vec<(u8, Box<dyn Read + Send>)> =
+        vec![(0u8, Box::new(stdout)), (1u8, Box::new(stderr))];
+    for (stream, reader) in readers {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let mut buf = std::io::BufReader::new(reader);
+            let mut raw: Vec<u8> = Vec::new();
+            // 按字节读行再 lossy：编排程序偶尔吐出非 UTF-8 的 PVF 片段，
+            // read_line 会当场报 InvalidData，整路输出就断在这里了。
+            while let Ok(n) = buf.read_until(b'\n', &mut raw) {
+                if n == 0 {
+                    break;
+                }
+                let text = String::from_utf8_lossy(&raw).trim_end_matches(['\r', '\n']).to_string();
+                raw.clear();
+                if tx.send(Msg::Line { stream, text }).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Done(child.wait().map(|status| status.success())));
+        });
+    }
+    drop(tx);
+
+    let deadline = Instant::now() + timeout;
+    let mut parts: [String; 2] = [String::new(), String::new()];
+    let mut status: Option<Result<bool, std::io::Error>> = None;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        match rx.recv_timeout(left) {
+            Ok(Msg::Line { stream, text }) => {
+                parts[stream as usize].push_str(&text);
+                parts[stream as usize].push('\n');
+                on_line(&text);
+            }
+            Ok(Msg::Done(result)) => status = Some(result),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
+        }
+    }
+    let Some(status) = status else {
+        kill_tree(pid);
+        return Err(format!("{label} 超时（{} 秒）", timeout.as_secs()));
+    };
+    let mut text = parts[0].clone();
+    text.push_str(&parts[1]);
+    status.map(|ok| (ok, text)).map_err(|err| format!("{label} 执行失败：{err}"))
 }

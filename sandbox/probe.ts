@@ -215,6 +215,15 @@ export function snapshot(): Snapshot {
     else if (m.width > m.inner + 1) overflowing.push(`挤掉 ${Math.round(m.width - m.inner)}px ${label}`);
   }
 
+  // 卡片里塞表格出的不是「文字挤掉」，是整张表的最小宽度顶过卡片（GM 页右栏只有 298px 内容宽）：
+  // 逐个量文字永远量不到，只能比卡片自己的 scrollWidth / clientWidth。
+  for (const card of Array.from(document.querySelectorAll<HTMLElement>("section.card"))) {
+    if (card.scrollWidth > card.clientWidth + 1) {
+      const head = card.querySelector("h2")?.textContent?.trim() ?? card.className;
+      overflowing.push(`卡片溢出 ${card.scrollWidth - card.clientWidth}px ${head}`);
+    }
+  }
+
   // --pill-glow 现在定义在 :root（配色方案那套 token 一起上收了），
   // 自定义属性的计算值是 var() 代入之后的文本，这一行能直接看出主题色到底混没混进边框那一圈。
   const glowRaw = getComputedStyle(document.documentElement).getPropertyValue("--pill-glow").trim();

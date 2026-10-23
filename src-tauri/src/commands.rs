@@ -14,6 +14,7 @@ use tauri_plugin_dialog::{DialogExt, FilePath};
 use crate::autofire::{self, Engine as AutofireEngine};
 use crate::background;
 use crate::config::{self, valid_account};
+use crate::gm;
 use crate::health;
 use crate::logbus::Line;
 use crate::memory;
@@ -36,6 +37,7 @@ pub struct AppState {
     pub session: Session,
     pub reporter: std::sync::Arc<report::Reporter>,
     pub autofire: std::sync::Arc<AutofireEngine>,
+    pub gm: gm::GmShared,
     pub app_dir: PathBuf,
     pub root: Root,
 }
@@ -78,14 +80,14 @@ pub struct ActionRecord {
 }
 
 /// 只要结果的长任务：丢到 blocking 线程池，主线程一卡窗口就「未响应」。
-async fn block<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+pub(crate) async fn block<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f)
         .await
         .map_err(|err| format!("后台任务异常终止：{err}"))
 }
 
 /// 本身就会失败的长任务：两层结果压成一层。
-async fn join<T: Send + 'static>(
+pub(crate) async fn join<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     match tauri::async_runtime::spawn_blocking(f).await {

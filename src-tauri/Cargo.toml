@@ -25,6 +25,9 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 sha2 = "0.11.1"
+# 方案 C 的 GM 索引读取器：default-features = false 只链入纯 JSON 读取（serde/serde_json），
+# PVF 构建内核（flate2/encoding_rs/rsa…）留在离线构建器里，不进启动器。
+gmbuild = { path = "../gmbuild", default-features = false }
 # 只为主页壁纸取一个主题色：四种收进白名单的位图格式各留一个解码器，别把整 crate 拉进来。
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
