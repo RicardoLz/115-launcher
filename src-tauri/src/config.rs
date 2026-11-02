@@ -28,15 +28,15 @@ fn write_json(path: &Path, value: &Value, indent: usize) -> Result<(), String> {
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("无法创建 {}：{}", parent.display(), err))?;
     }
-    let mut rendered =
-        serde_json::to_string_pretty(value).map_err(|err| err.to_string())?;
+    let mut rendered = serde_json::to_string_pretty(value).map_err(|err| err.to_string())?;
     if indent == 4 {
         rendered = widen_indent(&rendered);
     }
     rendered.push('\n');
 
     let tmp = path.with_extension(format!("json.partial-{}", std::process::id()));
-    std::fs::write(&tmp, rendered).map_err(|err| format!("写入 {} 失败：{}", tmp.display(), err))?;
+    std::fs::write(&tmp, rendered)
+        .map_err(|err| format!("写入 {} 失败：{}", tmp.display(), err))?;
     std::fs::rename(&tmp, path).map_err(|err| format!("替换 {} 失败：{}", path.display(), err))
 }
 
@@ -207,7 +207,10 @@ pub fn memory_tuning(root: &Root) -> MemoryTuning {
 /// 把它重写成只剩三个内存键等于把玩家的客户端目录和服务端二进制一起抹掉。
 pub fn set_memory_tuning(root: &Root, tuning: &MemoryTuning) -> Result<MemoryTuning, String> {
     let clean = MemoryTuning {
-        server_memory_limit_mib: check_mib(tuning.server_memory_limit_mib, "server_memory_limit_mib")?,
+        server_memory_limit_mib: check_mib(
+            tuning.server_memory_limit_mib,
+            "server_memory_limit_mib",
+        )?,
         go_mem_target_mib: check_mib(tuning.go_mem_target_mib, "go_mem_target_mib")?,
         import_max_procs: match tuning.import_max_procs.filter(|n| *n > 0) {
             Some(n) if n > MAX_IMPORT_PROCS => {
@@ -221,7 +224,9 @@ pub fn set_memory_tuning(root: &Root, tuning: &MemoryTuning) -> Result<MemoryTun
 
     let path = root.launcher_local_json();
     let mut value = read_launcher_object(&path)?;
-    let object = value.as_object_mut().expect("read_launcher_object 已保证是对象");
+    let object = value
+        .as_object_mut()
+        .expect("read_launcher_object 已保证是对象");
     for (key, wanted) in [
         ("server_memory_limit_mib", clean.server_memory_limit_mib),
         ("go_mem_target_mib", clean.go_mem_target_mib),
@@ -490,7 +495,10 @@ mod tests {
         for (label, text) in [
             ("配置缺席", None),
             ("值是空白", Some(r#"{"client_dir": ""}"#)),
-            ("指向已经不存在的目录", Some(r#"{"client_dir": "../../没了的客户端/DFO"}"#)),
+            (
+                "指向已经不存在的目录",
+                Some(r#"{"client_dir": "../../没了的客户端/DFO"}"#),
+            ),
         ] {
             let _ = std::fs::remove_file(&local);
             if let Some(text) = text {
@@ -503,7 +511,10 @@ mod tests {
         // 相对与绝对两种写法都要认账，认账时不走兜底。
         let absolute = client.display().to_string().replace('\\', "/");
         for (label, text) in [
-            ("相对路径", r#"{"client_dir": "../../客户端/DFO"}"#.to_string()),
+            (
+                "相对路径",
+                r#"{"client_dir": "../../客户端/DFO"}"#.to_string(),
+            ),
             ("绝对路径", format!(r#"{{"client_dir": "{absolute}"}}"#)),
         ] {
             std::fs::write(&local, text).expect("写 launcher.local.json");
@@ -518,11 +529,8 @@ mod tests {
     }
 
     fn temp_root(label: &str) -> (Root, PathBuf) {
-        let base = std::env::temp_dir().join(format!(
-            "dfo-memory-test-{}-{}",
-            std::process::id(),
-            label
-        ));
+        let base =
+            std::env::temp_dir().join(format!("dfo-memory-test-{}-{}", std::process::id(), label));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("server")).expect("造 server");
         (
@@ -560,7 +568,12 @@ mod tests {
         assert!(!raw.starts_with(&[0xEF, 0xBB, 0xBF]), "必须无 BOM");
         assert!(raw.starts_with(b"{"), "首个字节就该是 JSON");
         let text = String::from_utf8(raw).expect("UTF-8");
-        for keep in ["client_dir", "server_binary", "channel_identity", "future_key"] {
+        for keep in [
+            "client_dir",
+            "server_binary",
+            "channel_identity",
+            "future_key",
+        ] {
             assert!(text.contains(keep), "{keep} 不该被丢掉");
         }
         assert_eq!(
@@ -575,10 +588,19 @@ mod tests {
         // 全填 0 = 全部不限：三个键从文件里消失，别人的键一个不少。
         set_memory_tuning(&root, &MemoryTuning::default()).expect("清空该成功");
         let text = std::fs::read_to_string(&local).expect("读回");
-        for key in ["server_memory_limit_mib", "go_mem_target_mib", "import_max_procs"] {
+        for key in [
+            "server_memory_limit_mib",
+            "go_mem_target_mib",
+            "import_max_procs",
+        ] {
             assert!(!text.contains(key), "{key} 该被删掉而不是留个 0");
         }
-        for keep in ["client_dir", "server_binary", "channel_identity", "future_key"] {
+        for keep in [
+            "client_dir",
+            "server_binary",
+            "channel_identity",
+            "future_key",
+        ] {
             assert!(text.contains(keep), "{keep} 不该被丢掉");
         }
         assert_eq!(memory_tuning(&root), MemoryTuning::default());
@@ -619,13 +641,20 @@ mod tests {
             },
         )
         .expect("正好 65536 该放行");
-        assert_eq!(memory_tuning(&root).import_max_procs, Some(MAX_IMPORT_PROCS));
+        assert_eq!(
+            memory_tuning(&root).import_max_procs,
+            Some(MAX_IMPORT_PROCS)
+        );
 
         // 被拒的那两次没动过文件。
         std::fs::write(&local, &before).expect("复原以比对");
         let err = set_memory_tuning(&root, &too_many).expect_err("仍然该拒");
         assert!(err.contains("65536"), "{err}");
-        assert_eq!(std::fs::read(&local).expect("读回"), before, "拒绝时不许落盘");
+        assert_eq!(
+            std::fs::read(&local).expect("读回"),
+            before,
+            "拒绝时不许落盘"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -645,7 +674,10 @@ mod tests {
         )
         .expect_err("坏文件该报错");
         assert!(err.contains("不会覆盖"), "{err}");
-        assert_eq!(std::fs::read(&local).expect("读回"), b"{\n  \"client_dir\": ");
+        assert_eq!(
+            std::fs::read(&local).expect("读回"),
+            b"{\n  \"client_dir\": "
+        );
         // 文件缺席时另当别论：那是首次部署，写一份是安全的。
         std::fs::remove_file(&local).expect("删掉");
         assert_eq!(memory_tuning(&root), MemoryTuning::default());

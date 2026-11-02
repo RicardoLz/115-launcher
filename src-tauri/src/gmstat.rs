@@ -32,8 +32,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use gmbuild::growth::{GrowthFile, GrowthProfession};
 use gmbuild::gmindex::Catalog;
+use gmbuild::growth::{GrowthFile, GrowthProfession};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -68,17 +68,25 @@ fn read_rules(dir: &Path) -> Result<u8, String> {
     let raw = std::fs::read(&path).map_err(|e| format!("读取 {}：{}", path.display(), e))?;
     let v: Value =
         serde_json::from_slice(&raw).map_err(|e| format!("解析 {}：{}", path.display(), e))?;
-    let cap = v
-        .get("level_cap")
-        .and_then(|x| x.as_u64())
-        .filter(|n| (2..=u8::MAX as u64).contains(n))
-        .ok_or_else(|| "经验兼容规则缺少 2 至 255 之间的 level_cap".to_string())? as u8;
+    let cap =
+        v.get("level_cap")
+            .and_then(|x| x.as_u64())
+            .filter(|n| (2..=u8::MAX as u64).contains(n))
+            .ok_or_else(|| "经验兼容规则缺少 2 至 255 之间的 level_cap".to_string())? as u8;
     if v.get("model").and_then(|x| x.as_str()) != Some("reference90-solo-v1") {
         return Err("经验兼容规则不是 reference90-solo-v1".into());
     }
-    let sha = v.get("reference_sha256").and_then(|x| x.as_str()).unwrap_or("");
-    let mult = v.get("named_multiplier").and_then(|x| x.as_f64()).unwrap_or(0.0);
-    let penalty = v.get("monster_minus_character_level_rates").and_then(|x| x.as_object());
+    let sha = v
+        .get("reference_sha256")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    let mult = v
+        .get("named_multiplier")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+    let penalty = v
+        .get("monster_minus_character_level_rates")
+        .and_then(|x| x.as_object());
     if sha.len() != 64 || !(mult > 0.0) || penalty.map(|m| m.is_empty()).unwrap_or(true) {
         return Err("经验兼容规则不完整".into());
     }
@@ -100,12 +108,18 @@ impl Context {
     /// 这里是每次写前按这一行的 `config_version` 判。
     fn identity_ok(&self, config_version: &str) -> bool {
         config_version == save_identity()
-            || (is_hex64(&self.growth.source.checksum) && config_version == self.growth.source.checksum)
+            || (is_hex64(&self.growth.source.checksum)
+                && config_version == self.growth.source.checksum)
     }
 
     /// Go `characterCatalog` 那三道门：存档身份、职业存在、来源指纹。
     /// 话术与 Go 一致，因为它就是这一批唯一的拒绝点。
-    pub(crate) fn profession(&self, config_version: &str, profession: i64, state: &Value) -> Result<&GrowthProfession, String> {
+    pub(crate) fn profession(
+        &self,
+        config_version: &str,
+        profession: i64,
+        state: &Value,
+    ) -> Result<&GrowthProfession, String> {
         let mismatch = || "当前 PVF 职业目录与角色存档不匹配，已拒绝修改".to_string();
         if !self.identity_ok(config_version) {
             return Err(mismatch());
@@ -115,7 +129,10 @@ impl Context {
             .then(|| self.growth.professions.get(&(profession as u8)))
             .flatten()
             .ok_or_else(mismatch)?;
-        let source = state.get("source_sha256").and_then(|v| v.as_str()).unwrap_or("");
+        let source = state
+            .get("source_sha256")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if source != prof.raw_sha256 {
             return Err(mismatch());
         }
@@ -137,7 +154,9 @@ fn as_int(v: &Value, max: u64) -> Option<u64> {
 pub(crate) fn read_uint(state: &Value, key: &str, max: u64) -> Result<u64, String> {
     match state.get(key) {
         None | Some(Value::Null) => Ok(0),
-        Some(v) => as_int(v, max).ok_or_else(|| format!("角色存档字段 {key} 不是 {max} 以内的整数")),
+        Some(v) => {
+            as_int(v, max).ok_or_else(|| format!("角色存档字段 {key} 不是 {max} 以内的整数"))
+        }
     }
 }
 
@@ -162,7 +181,8 @@ fn read_pair(state: &Value, key: &str) -> Result<[u16; 2], String> {
 }
 
 fn map_of(doc: &mut Value) -> Result<&mut Map<String, Value>, String> {
-    doc.as_object_mut().ok_or_else(|| "角色存档格式无效".to_string())
+    doc.as_object_mut()
+        .ok_or_else(|| "角色存档格式无效".to_string())
 }
 
 /// Go `State.Attributes map[string]float32`：缺席或 null 就是 nil（ApplyGain 据此拒绝），
@@ -248,7 +268,10 @@ fn check_learned(doc: &Value) -> Result<(), String> {
 
 /// Go `EntryAddition` 里那串原生单位换算：只核对界内，不投影（见模块头第三条差异）。
 fn entry_addition_gate(doc: &Value) -> Result<(), String> {
-    let source = doc.get("source_sha256").and_then(|v| v.as_str()).unwrap_or("");
+    let source = doc
+        .get("source_sha256")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if source.is_empty() {
         return Err("missing source character data".into());
     }
@@ -272,7 +295,12 @@ fn entry_addition_gate(doc: &Value) -> Result<(), String> {
     b.scaled(&attrs, "[physical defense]", u16_max);
     b.scaled(&attrs, "[magical attack]", u16_max);
     b.scaled(&attrs, "[magical defense]", u16_max);
-    for name in ["[fire resistance]", "[water resistance]", "[dark resistance]", "[light resistance]"] {
+    for name in [
+        "[fire resistance]",
+        "[water resistance]",
+        "[dark resistance]",
+        "[light resistance]",
+    ] {
         b.signed(&attrs, name);
     }
     b.scaled(&attrs, "[inventory limit]", i32_max);
@@ -319,7 +347,12 @@ fn apply_advancement(doc: &mut Value, prof: &GrowthProfession, target: u8) -> Re
     if target == adv && stage == 0 {
         return Ok(false);
     }
-    if prof.advancement_growth.get(&target).map(|g| g.is_empty()).unwrap_or(true) {
+    if prof
+        .advancement_growth
+        .get(&target)
+        .map(|g| g.is_empty())
+        .unwrap_or(true)
+    {
         return Err("profession cannot advance to that branch".into());
     }
     let fields = map_of(doc)?;
@@ -358,10 +391,7 @@ fn fill_variation_slots(doc: &mut Value) -> Result<(), String> {
     evolve.insert("Empty".into(), Value::from(1u64));
 
     // Go 的补位：强化（intension）三行、演进（option）五行，缺一律铺空白槽。
-    let pads = [
-        ("intensions", 3usize, enhance),
-        ("options", 5usize, evolve),
-    ];
+    let pads = [("intensions", 3usize, enhance), ("options", 5usize, evolve)];
     for row in rows.iter_mut() {
         // preset 为 0 时 Go 的 omitempty 会整个丢掉这一键，这里同口径。
         if row.get("preset").and_then(|v| v.as_u64()).unwrap_or(0) == 0 {
@@ -454,7 +484,8 @@ fn apply_awakening(doc: &mut Value, prof: &GrowthProfession, stage: u8) -> Resul
                         .parse::<u16>()
                         .map_err(|_| format!("已学技能 id {key} 不在存档范围内"))?;
                     let rank = as_int(value, u8::MAX as u64)
-                        .ok_or_else(|| format!("已学技能 {id} 的品级无效"))? as u8;
+                        .ok_or_else(|| format!("已学技能 {id} 的品级无效"))?
+                        as u8;
                     map.insert(id, rank);
                 }
                 trees[i] = Some(map);
@@ -464,7 +495,8 @@ fn apply_awakening(doc: &mut Value, prof: &GrowthProfession, stage: u8) -> Resul
     }
     for pair in grants.chunks(2) {
         let (id, rank) = (pair[0], pair[1]);
-        let entry = (1..=u16::MAX as i32).contains(&id)
+        let entry = (1..=u16::MAX as i32)
+            .contains(&id)
             .then(|| (1..=255i32).contains(&rank).then_some(id as u16))
             .flatten();
         let required = match entry.and_then(|key| prof.awakening_levels.get(&key)) {
@@ -486,7 +518,11 @@ fn apply_awakening(doc: &mut Value, prof: &GrowthProfession, stage: u8) -> Resul
         }
     }
     // 技巧点要在借走 `doc` 之前读（Go 用的是解进结构体的那一份）。
-    let points = if stage == 3 { Some(read_pair(doc, "technique_points")?) } else { None };
+    let points = if stage == 3 {
+        Some(read_pair(doc, "technique_points")?)
+    } else {
+        None
+    };
     let fields = map_of(doc)?;
     fields.insert("awakening".into(), Value::from(stage as u64));
     fields.insert(
@@ -517,10 +553,16 @@ fn apply_awakening(doc: &mut Value, prof: &GrowthProfession, stage: u8) -> Resul
 // ---------------------------------------------------------------------------
 
 /// Go `progression.AddExperience`。
-fn add_experience(ctx: &Context, level: u8, total: u64, gain: u64) -> Result<(u8, u64, u32), String> {
+fn add_experience(
+    ctx: &Context,
+    level: u8,
+    total: u64,
+    gain: u64,
+) -> Result<(u8, u64, u32), String> {
     let cap = ctx.level_cap;
     let thresholds = &ctx.growth.thresholds;
-    if level == 0 || level > cap || (cap as usize) - 1 > thresholds.len() || u64::MAX - total < gain {
+    if level == 0 || level > cap || (cap as usize) - 1 > thresholds.len() || u64::MAX - total < gain
+    {
         return Err("invalid experience ledger or cap".into());
     }
     if level > 1 && total < thresholds[level as usize - 2] {
@@ -736,7 +778,10 @@ pub(crate) fn apply(
         other => return Err(format!("不支持的角色养成操作：{other}")),
     }
     if doc == before {
-        return Ok((raw.to_vec(), receipt(action, value, stage, &before, &before)));
+        return Ok((
+            raw.to_vec(),
+            receipt(action, value, stage, &before, &before),
+        ));
     }
     let bytes = serde_json::to_vec(&doc).map_err(|e| e.to_string())?;
     Ok((bytes, receipt(action, value, stage, &before, &doc)))
@@ -802,11 +847,17 @@ pub fn options(
             "SELECT profession,config_version,state FROM characters \
              WHERE account_id=?1 AND id=?2 AND deleted_at IS NULL",
             rusqlite::params![account, character],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, Vec<u8>>(2)?)),
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                ))
+            },
         )
         .map_err(|e| format!("角色不存在：{e}"))?;
-    let state: Value =
-        serde_json::from_slice(&state_raw).map_err(|e| format!("角色存档不是可识别的 JSON：{e}"))?;
+    let state: Value = serde_json::from_slice(&state_raw)
+        .map_err(|e| format!("角色存档不是可识别的 JSON：{e}"))?;
     ctx.profession(&config_version, profession, &state)?;
     let level = read_uint(&state, "level", u8::MAX as u64)? as u8;
     let experience = read_uint(&state, "experience", u64::MAX)?;
@@ -862,7 +913,11 @@ pub fn options(
         branches,
         source_checksum: ctx.growth.source.checksum.clone(),
         profession,
-        class_name: cat.class_of_role_full(profession, i64::from(advancement), i64::from(awakening)),
+        class_name: cat.class_of_role_full(
+            profession,
+            i64::from(advancement),
+            i64::from(awakening),
+        ),
     })
 }
 
@@ -890,7 +945,8 @@ pub async fn gm_growth_options(
 
 /// 夹具里 `.chr` 原文指纹与归档校验共用这一枚 64 位 hex，两条身份门都能过。
 #[cfg(test)]
-pub(crate) const TEST_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+pub(crate) const TEST_HASH: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 /// 等级上限 5、门槛四档、每级 SP 3/4/5/6；职业 0 有分支 1、2。
 /// 分支 1 的三段觉醒：1 段授 100，2 段授 101(75 级) 与 102(85 级)，3 段授 103(100 级)。
@@ -938,13 +994,19 @@ pub(crate) fn test_context() -> Context {
                 raw_sha256: TEST_HASH.into(),
                 job: "[swordman]".into(),
                 base_growth: base,
-                advancement_growth: std::collections::BTreeMap::from([(1u8, advanced.clone()), (2u8, advanced)]),
+                advancement_growth: std::collections::BTreeMap::from([
+                    (1u8, advanced.clone()),
+                    (2u8, advanced),
+                ]),
                 awakening_skills,
                 awakening_levels,
             },
         )]),
     };
-    Context { growth, level_cap: 5 }
+    Context {
+        growth,
+        level_cap: 5,
+    }
 }
 
 #[cfg(test)]
@@ -966,7 +1028,12 @@ mod tests {
     }
 
     /// 走一遍写侧，身份用当前契约（Go 的 SaveIdentity()）。
-    fn attempt(action: &str, value: u32, stage: Option<u8>, json: &str) -> Result<(Vec<u8>, Value), String> {
+    fn attempt(
+        action: &str,
+        value: u32,
+        stage: Option<u8>,
+        json: &str,
+    ) -> Result<(Vec<u8>, Value), String> {
         run(&save_identity(), action, value, stage, json)
     }
 
@@ -977,7 +1044,15 @@ mod tests {
         stage: Option<u8>,
         json: &str,
     ) -> Result<(Vec<u8>, Value), String> {
-        apply(&ctx(), json.as_bytes(), 0, config_version, action, value, stage)
+        apply(
+            &ctx(),
+            json.as_bytes(),
+            0,
+            config_version,
+            action,
+            value,
+            stage,
+        )
     }
 
     fn wrote(action: &str, value: u32, stage: Option<u8>, json: &str) -> Value {
@@ -1002,15 +1077,30 @@ mod tests {
         // config_version 既不是当前契约、也不是产物归档校验。
         let json = state(1, 0, r#""advancement":0"#);
         assert_eq!(
-            run("0000000000000000000000000000000000000000000000000000000000000000", "level", 3, None, &json)
-                .unwrap_err(),
+            run(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "level",
+                3,
+                None,
+                &json
+            )
+            .unwrap_err(),
             "当前 PVF 职业目录与角色存档不匹配，已拒绝修改"
         );
         // BindGMIdentity 允许的那条旧身份：等于产物归档校验，且是 64 位 hex。
         assert!(wrote("level", 3, None, &json)["level"] == 3);
         // 职业码在产物里没有。
         assert_eq!(
-            apply(&ctx(), json.as_bytes(), 7, &save_identity(), "level", 3, None).unwrap_err(),
+            apply(
+                &ctx(),
+                json.as_bytes(),
+                7,
+                &save_identity(),
+                "level",
+                3,
+                None
+            )
+            .unwrap_err(),
             "当前 PVF 职业目录与角色存档不匹配，已拒绝修改"
         );
     }
@@ -1050,9 +1140,18 @@ mod tests {
     #[test]
     fn level_prechecks_match_go_wording() {
         let json = state(3, 0, r#""advancement":0"#);
-        assert_eq!(refused("level", 3, None, &json), "目标等级必须高于当前等级且不超过服务器上限");
-        assert_eq!(refused("level", 2, None, &json), "目标等级必须高于当前等级且不超过服务器上限");
-        assert_eq!(refused("level", 6, None, &json), "目标等级必须高于当前等级且不超过服务器上限");
+        assert_eq!(
+            refused("level", 3, None, &json),
+            "目标等级必须高于当前等级且不超过服务器上限"
+        );
+        assert_eq!(
+            refused("level", 2, None, &json),
+            "目标等级必须高于当前等级且不超过服务器上限"
+        );
+        assert_eq!(
+            refused("level", 6, None, &json),
+            "目标等级必须高于当前等级且不超过服务器上限"
+        );
         // 等级 2 的门槛是 100，经验已经 300 ⇒ 存档经验跑到了目标等级之后。
         assert_eq!(
             refused("level", 2, None, &state(1, 300, r#""advancement":0"#)),
@@ -1063,22 +1162,37 @@ mod tests {
     #[test]
     fn level_domain_refusals() {
         // 属性表缺席 = Go 的 state.Attributes == nil。
-        let no_attrs =
-            format!(r#"{{"level":1,"experience":0,"skill_points":[0,0],"source_sha256":"{HASH}","advancement":0}}"#);
-        assert_eq!(refused("level", 3, None, &no_attrs), "missing source character attributes");
+        let no_attrs = format!(
+            r#"{{"level":1,"experience":0,"skill_points":[0,0],"source_sha256":"{HASH}","advancement":0}}"#
+        );
+        assert_eq!(
+            refused("level", 3, None, &no_attrs),
+            "missing source character attributes"
+        );
         // 跨过的那一级没有 SP 行。
         let mut c = ctx();
         c.growth.skill_points.remove(&3u16);
         assert_eq!(
-            apply(&c, state(1, 0, r#""advancement":0"#).as_bytes(), 0, &save_identity(), "level", 3, None)
-                .unwrap_err(),
+            apply(
+                &c,
+                state(1, 0, r#""advancement":0"#).as_bytes(),
+                0,
+                &save_identity(),
+                "level",
+                3,
+                None
+            )
+            .unwrap_err(),
             "missing crossed-level SP row"
         );
         // 技能点两格都会溢出。
         let loaded = format!(
             r#"{{"level":1,"experience":0,"attributes":{{"[hp max]":100}},"skill_points":[65530,65530],"learned_skills":[null,null],"source_sha256":"{HASH}","advancement":0}}"#
         );
-        assert_eq!(refused("level", 5, None, &loaded), "skill point ledger overflow");
+        assert_eq!(
+            refused("level", 5, None, &loaded),
+            "skill point ledger overflow"
+        );
         // 已转职但产物里那一段成长是空的。
         let mut c = ctx();
         c.growth
@@ -1088,8 +1202,16 @@ mod tests {
             .advancement_growth
             .insert(3u8, BTreeMap::new());
         assert_eq!(
-            apply(&c, state(1, 0, r#""advancement":3"#).as_bytes(), 0, &save_identity(), "level", 3, None)
-                .unwrap_err(),
+            apply(
+                &c,
+                state(1, 0, r#""advancement":3"#).as_bytes(),
+                0,
+                &save_identity(),
+                "level",
+                3,
+                None
+            )
+            .unwrap_err(),
             "missing source profession growth"
         );
     }
@@ -1117,7 +1239,10 @@ mod tests {
         let broken = format!(
             r#"{{"level":1,"experience":0,"attributes":{{"[hp max]":100}},"skill_points":[0,0],"learned_skills":[{{"0":1}},null],"source_sha256":"{HASH}","advancement":0}}"#
         );
-        assert_eq!(refused("level", 3, None, &broken), "invalid learned skill state");
+        assert_eq!(
+            refused("level", 3, None, &broken),
+            "invalid learned skill state"
+        );
         // 满级门那条：source_sha256 空着就是 Go 的「missing source character data」。
         let no_source = format!(
             r#"{{"level":1,"experience":0,"attributes":{{"[hp max]":100}},"skill_points":[0,0],"learned_skills":[null,null],"source_sha256":"","advancement":0}}"#
@@ -1145,11 +1270,18 @@ mod tests {
         assert_eq!(out["attributes"]["[hp max]"], 100);
 
         // 换分支：已在分支 1、二觉，选分支 2 回到未觉醒（Go 同语义）。
-        let json = state(80, 0, r#""advancement":1,"awakening":2,"learned_skills":[{"100":1},{"100":1}],"technique_points":[5,0]"#);
+        let json = state(
+            80,
+            0,
+            r#""advancement":1,"awakening":2,"learned_skills":[{"100":1},{"100":1}],"technique_points":[5,0]"#,
+        );
         let out = wrote("advancement", 2, None, &json);
         assert_eq!(out["advancement"], 2);
         assert_eq!(out["awakening"], 0);
-        assert_eq!(out["technique_points"][0], 5, "换分支不动技巧点账本，Go 也只落两键");
+        assert_eq!(
+            out["technique_points"][0], 5,
+            "换分支不动技巧点账本，Go 也只落两键"
+        );
 
         // 幂等空转：已在该分支且未觉醒 ⇒ 原字节交回。
         let json = state(48, 0, r#""advancement":1,"awakening":0"#);
@@ -1161,15 +1293,26 @@ mod tests {
     #[test]
     fn advancement_refusals() {
         let json = state(48, 0, r#""advancement":0"#);
-        assert_eq!(refused("advancement", 16, None, &json), "转职分支必须在 1 至 15 之间");
-        assert_eq!(refused("advancement", 0, None, &json), "invalid advancement target");
+        assert_eq!(
+            refused("advancement", 16, None, &json),
+            "转职分支必须在 1 至 15 之间"
+        );
+        assert_eq!(
+            refused("advancement", 0, None, &json),
+            "invalid advancement target"
+        );
         assert_eq!(
             refused("advancement", 9, None, &json),
             "profession cannot advance to that branch"
         );
         // 存档本身形状坏了（觉醒非零却没转职）：WireAdvancement 先拒。
         assert_eq!(
-            refused("advancement", 1, None, &state(48, 0, r#""advancement":0,"awakening":2"#)),
+            refused(
+                "advancement",
+                1,
+                None,
+                &state(48, 0, r#""advancement":0,"awakening":2"#)
+            ),
             "invalid advancement/stage"
         );
     }
@@ -1188,7 +1331,11 @@ mod tests {
         assert!(out.get("skill_variations").is_none());
 
         // 二觉：85 级那条在本场（80 级）只挂账不授予。
-        let json = state(80, 0, r#""advancement":1,"awakening":1,"learned_skills":[{"100":1},{"100":1}]"#);
+        let json = state(
+            80,
+            0,
+            r#""advancement":1,"awakening":1,"learned_skills":[{"100":1},{"100":1}]"#,
+        );
         let out = wrote("awakening", 2, None, &json);
         assert_eq!(out["awakening"], 2);
         assert_eq!(out["learned_skills"][0]["101"], 1);
@@ -1204,9 +1351,19 @@ mod tests {
         assert_eq!(variations.len(), 2);
         assert_eq!(variations[0]["intensions"].as_array().unwrap().len(), 3);
         assert_eq!(variations[0]["options"].as_array().unwrap().len(), 5);
-        assert_eq!(variations[0]["intensions"][0], serde_json::json!({"ID":0,"Choice":3,"Status":2,"Empty":0}));
-        assert_eq!(variations[0]["options"][0], serde_json::json!({"ID":0,"Choice":3,"Status":0,"Empty":1}));
-        assert_eq!(variations[0].get("preset"), None, "preset 为 0 时 Go 的 omitempty 丢键");
+        assert_eq!(
+            variations[0]["intensions"][0],
+            serde_json::json!({"ID":0,"Choice":3,"Status":2,"Empty":0})
+        );
+        assert_eq!(
+            variations[0]["options"][0],
+            serde_json::json!({"ID":0,"Choice":3,"Status":0,"Empty":1})
+        );
+        assert_eq!(
+            variations[0].get("preset"),
+            None,
+            "preset 为 0 时 Go 的 omitempty 丢键"
+        );
     }
 
     #[test]
@@ -1225,7 +1382,10 @@ mod tests {
             serde_json::json!({"ID":9,"Choice":1,"Status":2,"Empty":0})
         );
         assert_eq!(variations[0]["intensions"].as_array().unwrap().len(), 3);
-        assert!(variations[1].get("preset").is_none(), "第二棵树 preset 为 0 ⇒ 丢键");
+        assert!(
+            variations[1].get("preset").is_none(),
+            "第二棵树 preset 为 0 ⇒ 丢键"
+        );
         assert_eq!(variations[1]["options"].as_array().unwrap().len(), 5);
         assert_eq!(out["technique_points"][1], 3, "只改第一格");
     }
@@ -1236,17 +1396,29 @@ mod tests {
             refused("awakening", 1, None, &state(50, 0, r#""advancement":0"#)),
             "请先完成转职"
         );
-        assert_eq!(refused("awakening", 4, None, &state(50, 0, r#""advancement":1"#)), "觉醒阶段必须在 1 至 3 之间");
+        assert_eq!(
+            refused("awakening", 4, None, &state(50, 0, r#""advancement":1"#)),
+            "觉醒阶段必须在 1 至 3 之间"
+        );
         assert_eq!(
             refused("awakening", 1, None, &state(49, 0, r#""advancement":1"#)),
             "所选觉醒需要达到 50 级"
         );
         assert_eq!(
-            refused("awakening", 2, None, &state(99, 0, r#""advancement":1,"awakening":3"#)),
+            refused(
+                "awakening",
+                2,
+                None,
+                &state(99, 0, r#""advancement":1,"awakening":3"#)
+            ),
             "不能降低已完成的觉醒阶段"
         );
         // 同段重放：不改字节。
-        let json = state(50, 0, r#""advancement":1,"awakening":1,"learned_skills":[{"100":1},{"100":1}]"#);
+        let json = state(
+            50,
+            0,
+            r#""advancement":1,"awakening":1,"learned_skills":[{"100":1},{"100":1}]"#,
+        );
         let (bytes, _) = attempt("awakening", 1, None, &json).unwrap();
         assert_eq!(bytes, json.as_bytes());
 
@@ -1266,8 +1438,16 @@ mod tests {
             .unwrap()
             .insert(1u8, vec![999i32, 1]);
         assert_eq!(
-            apply(&c, state(50, 0, r#""advancement":2"#).as_bytes(), 0, &save_identity(), "awakening", 1, None)
-                .unwrap_err(),
+            apply(
+                &c,
+                state(50, 0, r#""advancement":2"#).as_bytes(),
+                0,
+                &save_identity(),
+                "awakening",
+                1,
+                None
+            )
+            .unwrap_err(),
             "invalid awakening skill grant"
         );
         // [required level] 不是一个数。
@@ -1279,8 +1459,16 @@ mod tests {
             .awakening_levels
             .insert(100u16, vec![50i32, 60i32]);
         assert_eq!(
-            apply(&c, state(50, 0, r#""advancement":1"#).as_bytes(), 0, &save_identity(), "awakening", 1, None)
-                .unwrap_err(),
+            apply(
+                &c,
+                state(50, 0, r#""advancement":1"#).as_bytes(),
+                0,
+                &save_identity(),
+                "awakening",
+                1,
+                None
+            )
+            .unwrap_err(),
             "awakening skill level missing"
         );
     }
@@ -1297,7 +1485,11 @@ mod tests {
         assert_eq!(out["learned_skills"][0]["103"], 1);
 
         // 换分支 + 只到一觉：先落分支（觉醒归零），再走一段。
-        let json = state(60, 0, r#""advancement":2,"awakening":1,"learned_skills":[{"100":2},{"100":2}]"#);
+        let json = state(
+            60,
+            0,
+            r#""advancement":2,"awakening":1,"learned_skills":[{"100":2},{"100":2}]"#,
+        );
         let out = wrote("profession", 1, Some(1), &json);
         assert_eq!(out["advancement"], 1);
         assert_eq!(out["awakening"], 1);
@@ -1306,11 +1498,20 @@ mod tests {
 
         // 同分支降阶段：拒。
         assert_eq!(
-            refused("profession", 1, Some(1), &state(100, 0, r#""advancement":1,"awakening":2"#)),
+            refused(
+                "profession",
+                1,
+                Some(1),
+                &state(100, 0, r#""advancement":1,"awakening":2"#)
+            ),
             "当前分支不能降低已完成的觉醒阶段"
         );
         // 同分支同阶段：空转，字节不动。
-        let json = state(100, 0, r#""advancement":1,"awakening":1,"learned_skills":[{"100":1},{"100":1}]"#);
+        let json = state(
+            100,
+            0,
+            r#""advancement":1,"awakening":1,"learned_skills":[{"100":1},{"100":1}]"#,
+        );
         let (bytes, _) = attempt("profession", 1, Some(1), &json).unwrap();
         assert_eq!(bytes, json.as_bytes());
     }
@@ -1318,23 +1519,46 @@ mod tests {
     #[test]
     fn profession_refusals() {
         let json = state(100, 0, r#""advancement":0"#);
-        assert_eq!(refused("profession", 1, None, &json), "请选择有效的转职分支和觉醒阶段");
-        assert_eq!(refused("profession", 1, Some(4), &json), "请选择有效的转职分支和觉醒阶段");
-        assert_eq!(refused("profession", 16, Some(0), &json), "请选择有效的转职分支和觉醒阶段");
-        assert_eq!(refused("profession", 9, Some(0), &json), "当前职业不支持该转职分支");
         assert_eq!(
-            refused("profession", 1, Some(2), &state(60, 0, r#""advancement":0"#)),
+            refused("profession", 1, None, &json),
+            "请选择有效的转职分支和觉醒阶段"
+        );
+        assert_eq!(
+            refused("profession", 1, Some(4), &json),
+            "请选择有效的转职分支和觉醒阶段"
+        );
+        assert_eq!(
+            refused("profession", 16, Some(0), &json),
+            "请选择有效的转职分支和觉醒阶段"
+        );
+        assert_eq!(
+            refused("profession", 9, Some(0), &json),
+            "当前职业不支持该转职分支"
+        );
+        assert_eq!(
+            refused(
+                "profession",
+                1,
+                Some(2),
+                &state(60, 0, r#""advancement":0"#)
+            ),
             "所选觉醒需要达到 75 级"
         );
         // 阶段 0 没有等级门（Go 的表第 0 格是 0）。
-        let out = wrote("profession", 1, Some(0), &state(20, 0, r#""advancement":0"#));
+        let out = wrote(
+            "profession",
+            1,
+            Some(0),
+            &state(20, 0, r#""advancement":0"#),
+        );
         assert_eq!(out["advancement"], 1);
         assert_eq!(out["awakening"], 0);
     }
 
     #[test]
     fn unknown_action_is_refused() {
-        assert!(refused("hp", 1, None, &state(1, 0, r#""advancement":0"#)).starts_with("不支持的角色养成操作"));
+        assert!(refused("hp", 1, None, &state(1, 0, r#""advancement":0"#))
+            .starts_with("不支持的角色养成操作"));
         assert!(is_growth_action("level") && is_growth_action("profession"));
         assert!(!is_growth_action("sp") && !is_growth_action("inventory.amount"));
     }
@@ -1348,7 +1572,13 @@ mod tests {
         assert!(receipt["stage"].is_null(), "非 profession 动作不带阶段");
         assert_eq!(receipt["before"]["level"], 1);
         assert_eq!(receipt["after"]["level"], 3);
-        let (_, receipt) = attempt("profession", 1, Some(1), &state(50, 0, r#""advancement":0"#)).unwrap();
+        let (_, receipt) = attempt(
+            "profession",
+            1,
+            Some(1),
+            &state(50, 0, r#""advancement":0"#),
+        )
+        .unwrap();
         assert_eq!(receipt["stage"], 1);
     }
 

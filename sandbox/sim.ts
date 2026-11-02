@@ -238,7 +238,7 @@ export function pushReadiness(): void {
 function selfCheck(): SelfUpdateCheck | null {
   if (st.self_latest === null) return null;
   return {
-    current_version: "0.1.0",
+    current_version: "1.0.0",
     latest_version: st.self_latest,
     has_update: true,
     asset_name: "DFO115USLauncher-setup.exe",
@@ -363,7 +363,7 @@ const handlers: Record<string, Handler> = {
   app_info(): AppInfo {
     return {
       name: "DFO-115US 启动器",
-      version: "0.1.0",
+      version: "1.0.0",
       root: st.root,
       root_source: "同级目录推断",
       app_dir: "D:\\115us\\服务端",
@@ -829,8 +829,8 @@ const handlers: Record<string, Handler> = {
     const info = selfCheck();
     if (info) return info;
     return {
-      current_version: "0.1.0",
-      latest_version: "0.1.0",
+      current_version: "1.0.0",
+      latest_version: "1.0.0",
       has_update: false,
       asset_name: "",
       asset_size: 0,

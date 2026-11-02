@@ -13,7 +13,7 @@
 use rusqlite::{params, Transaction};
 use serde::Serialize;
 
-use crate::gmgrant::{is_zero_u8, is_zero_u32, ManageInput};
+use crate::gmgrant::{is_zero_u32, is_zero_u8, ManageInput};
 
 /// Go `mail.MaxMessages` / `MaxUnclaimedAssets` / `MaxAttachments`。
 const MAX_MESSAGES: i64 = 255;
@@ -41,8 +41,10 @@ const SQL_MAILBOX_CAPACITY: &str = "SELECT count(*), CAST(coalesce(sum((SELECT c
 /// 所以末尾那个加数就是 `mail.RetentionDays`(15) 换成微秒：1296000000000。
 const SQL_INSERT_MAIL: &str = "INSERT INTO character_mail(recipient_id,sender_name,body,assets,expires_at) \
     VALUES(?1,?2,?3,?4,(CAST((julianday('now') - 2440587.5) * 86400000000 AS INTEGER) + 1296000000000)) RETURNING id";
-const SQL_SEQUENCE_BUMP: &str = "UPDATE sqlite_sequence SET seq = seq + 1 WHERE name = 'character_mail'";
-const SQL_SEQUENCE_OPEN: &str = "INSERT INTO sqlite_sequence(name, seq) VALUES('character_mail', 1)";
+const SQL_SEQUENCE_BUMP: &str =
+    "UPDATE sqlite_sequence SET seq = seq + 1 WHERE name = 'character_mail'";
+const SQL_SEQUENCE_OPEN: &str =
+    "INSERT INTO sqlite_sequence(name, seq) VALUES('character_mail', 1)";
 const SQL_SEQUENCE_READ: &str = "SELECT seq FROM sqlite_sequence WHERE name = 'character_mail'";
 const SQL_SEQUENCE_TABLE_PRESENT: &str =
     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mailbox_id_sequence'";
@@ -124,7 +126,11 @@ pub(crate) fn build_items(
         // Go：`limit := def.StackLimit; if limit == 0 { limit = a.Rules.MissingStackLimit }`。
         // 这里刻意不套背包发放那条「类型串含 unlimited 就放开到 i32::MAX」的例外：
         // 邮寄那一档在服务端走的是这道更紧的门，不是 `Bag.Add`。
-        let limit = if item.stack_limit > 0 { item.stack_limit } else { missing_stack_limit };
+        let limit = if item.stack_limit > 0 {
+            item.stack_limit
+        } else {
+            missing_stack_limit
+        };
         if amount > limit {
             return Err(format!("邮件数量超过堆叠上限{limit}"));
         }
@@ -155,7 +161,9 @@ pub(crate) fn build_items(
         };
         return Ok((0..amount).map(|_| one.clone()).collect());
     }
-    Err(format!("装备实例发放未支持（见 #27）：物品 {template} 不是可堆叠材料或时装"))
+    Err(format!(
+        "装备实例发放未支持（见 #27）：物品 {template} 不是可堆叠材料或时装"
+    ))
 }
 
 /// Go `advanceMailSequence`：附件号在消息号**之前**发，两者共用一个号段。
@@ -213,10 +221,18 @@ pub(crate) fn send(
 ) -> Result<(serde_json::Value, String), String> {
     let mut assets: Vec<MailAsset> = Vec::new();
     if input.gold > 0 {
-        assets.push(MailAsset { id: 0, gold: input.gold, item: None });
+        assets.push(MailAsset {
+            id: 0,
+            gold: input.gold,
+            item: None,
+        });
     }
     let items = build_items(cat, missing_stack_limit, input.template, input.amount)?;
-    assets.extend(items.into_iter().map(|item| MailAsset { id: 0, gold: 0, item: Some(item) }));
+    assets.extend(items.into_iter().map(|item| MailAsset {
+        id: 0,
+        gold: 0,
+        item: Some(item),
+    }));
     if assets.len() > MAX_ATTACHMENTS {
         // Go 的 `insertSystemMailTx` 第一道门就在这，容量检查之前。
         return Err("系统邮件附件过多".into());
@@ -231,9 +247,11 @@ pub(crate) fn send(
     }
     let encoded = serde_json::to_vec(&assets).map_err(|e| e.to_string())?;
     let mail_id: i64 = tx
-        .query_row(SQL_INSERT_MAIL, params![recipient, SENDER, input.body, encoded], |row| {
-            row.get(0)
-        })
+        .query_row(
+            SQL_INSERT_MAIL,
+            params![recipient, SENDER, input.body, encoded],
+            |row| row.get(0),
+        )
         .map_err(|e| format!("写入邮件失败：{e}"))?;
 
     let receipt = serde_json::json!({
@@ -248,5 +266,8 @@ pub(crate) fn send(
         "assets": serde_json::from_slice::<serde_json::Value>(&encoded).unwrap_or(serde_json::Value::Null),
         "capacity_before": { "messages": messages, "unclaimed_assets": unclaimed },
     });
-    Ok((receipt, "邮件已写入邮箱；停服发放，玩家重新进入游戏后可见".into()))
+    Ok((
+        receipt,
+        "邮件已写入邮箱；停服发放，玩家重新进入游戏后可见".into(),
+    ))
 }

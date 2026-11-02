@@ -88,7 +88,11 @@ pub fn listening_pid_map() -> HashMap<u16, u32> {
         if !fields[3].eq_ignore_ascii_case("LISTENING") {
             continue;
         }
-        let Some(port) = fields[1].rsplit(':').next().and_then(|s| s.parse::<u16>().ok()) else {
+        let Some(port) = fields[1]
+            .rsplit(':')
+            .next()
+            .and_then(|s| s.parse::<u16>().ok())
+        else {
             continue;
         };
         let Ok(pid) = fields[4].parse::<u32>() else {

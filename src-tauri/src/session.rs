@@ -266,7 +266,9 @@ impl Session {
         if mode == Mode::Compat {
             let cancel = self.inner.watcher_cancel.clone();
             let session = self.clone();
-            std::thread::spawn(move || session.watch_client_exit(epoch, settings.auto_stop_on_client_exit, cancel));
+            std::thread::spawn(move || {
+                session.watch_client_exit(epoch, settings.auto_stop_on_client_exit, cancel)
+            });
         }
 
         match self.start_flow(mode, epoch, &settings) {
@@ -298,7 +300,9 @@ impl Session {
         let bus = self.inner.bus.clone();
 
         // 1. 存档路由：只在缺 sqlite_path 时落一份，绝不覆盖玩家手上的配置。
-        let StoredRoute { describe, created, .. } = config::ensure_storage_route(&root)?;
+        let StoredRoute {
+            describe, created, ..
+        } = config::ensure_storage_route(&root)?;
         if created {
             bus.ok(format!("存档：已落盘 SQLite 档 —— {describe}"));
         } else {
@@ -323,7 +327,10 @@ impl Session {
 
         // 5. 环境变量。
         let env = self.launch_env(mode, settings);
-        bus.info(format!("本次以「{}」模式启动", config::game_mode_label(&settings.game_mode)));
+        bus.info(format!(
+            "本次以「{}」模式启动",
+            config::game_mode_label(&settings.game_mode)
+        ));
         if settings.auto_stop_on_client_exit && mode == Mode::Compat {
             bus.info("已开启「关闭游戏后自动停止服务端」：退出游戏客户端后会自动停掉服务端环境");
         }
@@ -386,7 +393,9 @@ impl Session {
             .unwrap_or_default();
         let cached_ok = {
             let cached = locked(&self.inner.orchestrator_probe);
-            cached.as_ref().is_some_and(|(seen, ok)| *seen == fingerprint && *ok)
+            cached
+                .as_ref()
+                .is_some_and(|(seen, ok)| *seen == fingerprint && *ok)
         };
         if cached_ok {
             return Ok(());
@@ -457,8 +466,11 @@ impl Session {
         bus: &Arc<Bus>,
     ) -> Result<String, String> {
         let exe = root.orchestrator_exe();
-        let mut args: Vec<String> =
-            vec!["launch".into(), "--root".into(), root.path.display().to_string()];
+        let mut args: Vec<String> = vec![
+            "launch".into(),
+            "--root".into(),
+            root.path.display().to_string(),
+        ];
         if mode == Mode::ServerOnly {
             args.push("--server-only".into());
         }
@@ -552,7 +564,11 @@ impl Session {
     ) -> String {
         let evidence = evidence_tail(root, wall_launched_at);
         let mut message = if entered_session {
-            format!("会话编排异常退出（退出码 {}）{evidence}{}", code_text(code), tail_block(lines))
+            format!(
+                "会话编排异常退出（退出码 {}）{evidence}{}",
+                code_text(code),
+                tail_block(lines)
+            )
         } else {
             format!(
                 "会话编排异常退出（尚未进入会话，CLI：{}，退出码 {}）{evidence}{}{}",
@@ -604,7 +620,8 @@ impl Session {
         if mode == Mode::ServerOnly || self.status().phase != Phase::Running {
             return;
         }
-        let trace = client_trace_path().map(|p| p.display().to_string())
+        let trace = client_trace_path()
+            .map(|p| p.display().to_string())
             .unwrap_or_else(|| "%USERPROFILE%\\AppData\\LocalLow\\DNF\\DFO.trc".to_string());
         self.alert(format!(
             "未能确认游戏客户端已启动：没有 {CLIENT_IMAGE_NAME} 进程，也没有新的客户端日志（{trace} 未更新）"
@@ -624,9 +641,8 @@ impl Session {
 
     /// 先锁 PID（进程句柄判活，150ms 一轮），锁不到就退回按名字轮询（先见后判）。
     fn watch_client_exit(&self, epoch: u64, auto_stop: bool, cancel: Arc<AtomicBool>) {
-        let stale_or_cancelled = || {
-            cancel.load(Ordering::SeqCst) || self.inner.epoch.load(Ordering::SeqCst) != epoch
-        };
+        let stale_or_cancelled =
+            || cancel.load(Ordering::SeqCst) || self.inner.epoch.load(Ordering::SeqCst) != epoch;
 
         // 锁 PID 的窗口要跟就绪探测同一口径：内层 PVF 预备 + 网关绑 7001 实测要 70 s
         // （23:31:24 点下 → 23:32:34 才起客户端），60 s 会在 DFO.exe 出现之前就关掉，
@@ -816,7 +832,10 @@ impl Session {
                 Err(err) => bus.warn(format!("[停止] {err}")),
             }
         } else {
-            bus.warn(format!("[停止] {}", orchestrator_missing_error(&exe, "stop")));
+            bus.warn(format!(
+                "[停止] {}",
+                orchestrator_missing_error(&exe, "stop")
+            ));
         }
 
         let deadline = Instant::now() + STOP_PORT_BUDGET;
@@ -965,7 +984,8 @@ impl LogRelay {
         }
         if line.contains("Client launch requested") {
             self.entered.store(true, Ordering::SeqCst);
-            self.bus.warn("[启动] 已请求启动游戏客户端（不校验画面是否出现，稍后自动核实）");
+            self.bus
+                .warn("[启动] 已请求启动游戏客户端（不校验画面是否出现，稍后自动核实）");
             return;
         }
         self.bus.info(format!("[启动] {line}"));

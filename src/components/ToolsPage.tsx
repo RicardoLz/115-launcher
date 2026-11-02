@@ -9,6 +9,7 @@ import {
   type KeyOption,
   type ServerUpdateCheck,
 } from "../bridge";
+import { UPDATES_ENABLED } from "../flags";
 
 const EMPTY_CONFIG: AutofireConfig = {
   enabled: false,
@@ -597,37 +598,40 @@ export default function ToolsPage({
           </p>
         </section>
 
-        <section className="card">
-          <h2>服务端更新</h2>
-          <p className="hint">
-            从 GitHub Release 拉取最新服务端（dfolauncher / wireprobe / 配置），自动测速选最快镜像，
-            保留 runtime\storage\ 存档。更新前请先停止服务端。
-          </p>
-          {update ? (
-            <div className="field">
-              <p className="hint">
-                本机版本：<strong>{update.current_tag ?? "未部署"}</strong>
-                <br />
-                最新版本：<strong>{update.latest_tag}</strong>
-                <br />
-                包大小：{(update.asset_size / 1048576).toFixed(1)} MB（{update.asset_name}）
-              </p>
-            </div>
-          ) : null}
-          <div className="row">
-            <button className="btn" disabled={updateBusy} onClick={() => void checkUpdate()}>
-              {updateBusy ? "检查中…" : "检查更新"}
-            </button>
-            {update?.has_update ? (
-              <button className="btn" data-tone="accent" disabled={updateBusy} onClick={() => void applyUpdate()}>
-                {updateBusy ? "下载部署中…" : `更新到 ${update.latest_tag}`}
-              </button>
+        {/* 服务端更新冻结期整体摘下（见 flags.ts），恢复时把开关改回 true 即可。 */}
+        {UPDATES_ENABLED ? (
+          <section className="card">
+            <h2>服务端更新</h2>
+            <p className="hint">
+              从 GitHub Release 拉取最新服务端（dfolauncher / wireprobe / 配置），自动测速选最快镜像，
+              保留 runtime\storage\ 存档。更新前请先停止服务端。
+            </p>
+            {update ? (
+              <div className="field">
+                <p className="hint">
+                  本机版本：<strong>{update.current_tag ?? "未部署"}</strong>
+                  <br />
+                  最新版本：<strong>{update.latest_tag}</strong>
+                  <br />
+                  包大小：{(update.asset_size / 1048576).toFixed(1)} MB（{update.asset_name}）
+                </p>
+              </div>
             ) : null}
-          </div>
-          <p className="hint">
-            下载与部署的详细进度会出现在「运行日志」面板。部署完成后下次点「开始游戏」即生效。
-          </p>
-        </section>
+            <div className="row">
+              <button className="btn" disabled={updateBusy} onClick={() => void checkUpdate()}>
+                {updateBusy ? "检查中…" : "检查更新"}
+              </button>
+              {update?.has_update ? (
+                <button className="btn" data-tone="accent" disabled={updateBusy} onClick={() => void applyUpdate()}>
+                  {updateBusy ? "下载部署中…" : `更新到 ${update.latest_tag}`}
+                </button>
+              ) : null}
+            </div>
+            <p className="hint">
+              下载与部署的详细进度会出现在「运行日志」面板。部署完成后下次点「开始游戏」即生效。
+            </p>
+          </section>
+        ) : null}
 
         <section className="card">
           <h2>游戏内辅助</h2>

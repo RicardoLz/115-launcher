@@ -157,6 +157,9 @@ const SLOT_BITS: { value: number; label: string }[] = [
 
 const clampPoint = (raw: string) => Math.min(65535, Math.max(0, Number(raw) || 0));
 
+/** 打造参数的小输入钳位（强化 31 / 红字 255 / 锻造 8）。 */
+const clampByte = (raw: string, max: number) => Math.min(max, Math.max(0, Number(raw) || 0));
+
 /** 觉醒阶段的显示名：0 是「未觉醒」那一档，Go 的表里也是这一格没有等级门。 */
 const AWAKENING_LABEL = ["未觉醒", "一觉", "二觉", "三觉"];
 
@@ -220,6 +223,8 @@ export default function GmPage({
   const [amount, setAmount] = useState(1);
   const [gold, setGold] = useState(0);
   const [cera, setCera] = useState(0);
+  /** 装备发放的打造参数；只在选中装备那张卡出现，0 恒等于「不调整」。 */
+  const [craft, setCraft] = useState({ upgrade: 0, amplify: 0, amplifyValue: 0, refine: 0, durability: 0 });
   const [reason, setReason] = useState("");
   const [mailBody, setMailBody] = useState("");
   const [granting, setGranting] = useState(false);
@@ -447,6 +452,7 @@ export default function GmPage({
   const select = (row: GmItemRow) => {
     setSelected(row);
     setOutcome(null);
+    setCraft({ upgrade: 0, amplify: 0, amplifyValue: 0, refine: 0, durability: 0 });
     commands.gmItem(row.id).then(setSelected, () => undefined);
   };
 
@@ -892,7 +898,24 @@ export default function GmPage({
         character: character.id,
         gold,
         cera,
-        items: wantsItem && selected ? [{ template: selected.id, amount }] : [],
+        items:
+          wantsItem && selected
+            ? [
+                {
+                  template: selected.id,
+                  amount,
+                  ...(selected.kind === "equipment"
+                    ? {
+                        upgrade: craft.upgrade,
+                        amplify: craft.amplify,
+                        amplify_value: craft.amplify > 0 ? craft.amplifyValue : 0,
+                        refine: craft.refine,
+                        durability: craft.durability,
+                      }
+                    : {}),
+                },
+              ]
+            : [],
         reason,
       });
       setOutcome({ text: receiptText(out), ok: true });
@@ -1258,6 +1281,84 @@ export default function GmPage({
                 <em>券</em>
               </label>
             </div>
+            {selected.kind === "equipment" ? (
+              <>
+                <div className="row">
+                  <label className="num">
+                    <span>强化</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={31}
+                      value={craft.upgrade}
+                      disabled={!selected.grantable}
+                      onChange={(e) => setCraft({ ...craft, upgrade: clampByte(e.target.value, 31) })}
+                    />
+                    <em>级</em>
+                  </label>
+                  <label className="num">
+                    <span>增幅</span>
+                    <select
+                      value={craft.amplify}
+                      disabled={!selected.grantable}
+                      onChange={(e) => setCraft({ ...craft, amplify: Number(e.target.value) || 0 })}
+                    >
+                      <option value={0}>无</option>
+                      <option value={1}>体力</option>
+                      <option value={2}>精神</option>
+                      <option value={3}>力量</option>
+                      <option value={4}>智力</option>
+                    </select>
+                  </label>
+                  {craft.amplify > 0 ? (
+                    <label className="num">
+                      <span>红字数值</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={255}
+                        value={craft.amplifyValue}
+                        disabled={!selected.grantable}
+                        onChange={(e) => setCraft({ ...craft, amplifyValue: clampByte(e.target.value, 255) })}
+                      />
+                      <em>点</em>
+                    </label>
+                  ) : null}
+                </div>
+                <div className="row">
+                  <label className="num">
+                    <span>锻造</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={8}
+                      value={craft.refine}
+                      disabled={!selected.grantable}
+                      onChange={(e) => setCraft({ ...craft, refine: clampByte(e.target.value, 8) })}
+                    />
+                    <em>级</em>
+                  </label>
+                  <label className="num">
+                    <span>耐久</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={65535}
+                      value={craft.durability}
+                      disabled={!selected.grantable}
+                      onChange={(e) =>
+                        setCraft({ ...craft, durability: Math.min(65535, Math.max(0, Number(e.target.value) || 0)) })
+                      }
+                    />
+                    <em>0=默认</em>
+                  </label>
+                </div>
+                <p className="hint">
+                  打造参数只对装备生效：强化与增幅共用同一级（带红字时界面显示「增幅 +N」）；
+                  锻造只有武器能吃；耐久留 0 按物品定义。这些值随件落库，一次发 N 件就是 N 件同样的打造状态。
+                </p>
+              </>
+            ) : null}
             <div className="field">
               <label>原因（写进发放审计，留空记「启动器发放」）</label>
               <input

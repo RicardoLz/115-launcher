@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::config;
-use crate::paths::Root;
 use crate::logbus::Bus;
+use crate::paths::Root;
 use crate::procutil;
 use crate::site::SITE;
 
@@ -211,8 +211,9 @@ impl Reporter {
             sent_at: stamp(),
         };
         push_sent(&self.dir, &record)?;
-        self.bus
-            .ok(format!("已保存这条反馈的查询凭证（{id}），换设备时能用它找回"));
+        self.bus.ok(format!(
+            "已保存这条反馈的查询凭证（{id}），换设备时能用它找回"
+        ));
         Ok(())
     }
 
@@ -220,10 +221,14 @@ impl Reporter {
     /// 玩家后来改主意时，之前那几次现场还在。
     pub fn report(&self, ev: Event) {
         let sending = self.enabled();
-        let fingerprint = format!("{}|{:?}|{}", ev.stage, ev.error_code, chars(&ev.actual, 160));
+        let fingerprint = format!(
+            "{}|{:?}|{}",
+            ev.stage,
+            ev.error_code,
+            chars(&ev.actual, 160)
+        );
         if self.seen_recently(&fingerprint) {
-            self.bus
-                .info("同类故障刚记过一次，这条按频率限制并掉了");
+            self.bus.info("同类故障刚记过一次，这条按频率限制并掉了");
             return;
         }
         let payload = match self.build(&ev) {
@@ -233,7 +238,10 @@ impl Reporter {
                 return;
             }
         };
-        let key = payload["request_key"].as_str().unwrap_or_default().to_string();
+        let key = payload["request_key"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let item = Queued {
             payload,
             attempts: 0,
@@ -248,7 +256,11 @@ impl Reporter {
         trim_dir(&self.dir.join("queue"), MAX_QUEUE);
         self.bus.info(format!(
             "故障已记入{}（{key}，{}）",
-            if sending { "上报队列" } else { "本机待报队列" },
+            if sending {
+                "上报队列"
+            } else {
+                "本机待报队列"
+            },
             ev.stage
         ));
         if sending {
@@ -259,7 +271,11 @@ impl Reporter {
     fn seen_recently(&self, fingerprint: &str) -> bool {
         let mut map = locked(&self.recent);
         let now = SystemTime::now();
-        map.retain(|_, seen| now.duration_since(*seen).map(|d| d < DEDUPE).unwrap_or(false));
+        map.retain(|_, seen| {
+            now.duration_since(*seen)
+                .map(|d| d < DEDUPE)
+                .unwrap_or(false)
+        });
         if map.contains_key(fingerprint) {
             return true;
         }
@@ -344,20 +360,23 @@ impl Reporter {
                     let _ = fs::remove_file(&path);
                 }
                 Err(PostError::Fatal(err)) => {
-                    self.bus.warn(format!("反馈站拒绝了这条报告，不再重试：{err}"));
+                    self.bus
+                        .warn(format!("反馈站拒绝了这条报告，不再重试：{err}"));
                     self.stash(&path);
                 }
                 Err(PostError::Retry(err)) => {
                     item.attempts += 1;
                     if item.attempts >= MAX_ATTEMPTS {
-                        self.bus
-                            .warn(format!("这条报告重试 {MAX_ATTEMPTS} 次仍未成功，先搁置在本机"));
+                        self.bus.warn(format!(
+                            "这条报告重试 {MAX_ATTEMPTS} 次仍未成功，先搁置在本机"
+                        ));
                         self.stash(&path);
                         continue;
                     }
                     item.next_at = now_secs() + backoff(item.attempts);
                     let _ = write_json(&path, &item);
-                    self.bus.info(format!("上报暂时没成功（{err}），已留在本地队列"));
+                    self.bus
+                        .info(format!("上报暂时没成功（{err}），已留在本地队列"));
                 }
             }
         }
@@ -421,16 +440,12 @@ impl Reporter {
                 server_error,
                 "返回里没有反馈编号",
             ))),
-            400 | 403 | 404 | 405 | 413 | 415 => {
-                Err(PostError::Fatal(if_empty(server_error, &format!(
-                    "HTTP {code}"
-                ))))
-            }
-            429 => Err(PostError::Retry(if_empty(server_error, "HTTP 429 限流"))),
-            0 => Err(PostError::Retry(if_empty(
+            400 | 403 | 404 | 405 | 413 | 415 => Err(PostError::Fatal(if_empty(
                 server_error,
-                "连不上反馈站",
+                &format!("HTTP {code}"),
             ))),
+            429 => Err(PostError::Retry(if_empty(server_error, "HTTP 429 限流"))),
+            0 => Err(PostError::Retry(if_empty(server_error, "连不上反馈站"))),
             other if other >= 500 => Err(PostError::Retry(format!("HTTP {other}"))),
             other => Err(PostError::Fatal(format!("HTTP {other}"))),
         }
@@ -458,7 +473,8 @@ impl Reporter {
         };
         if let Err(err) = push_sent(&self.dir, &record) {
             // 存不下就别删队列项，下次重试还会命中同一个 request_key。
-            self.bus.warn(format!("回执保存失败，这条报告留在队列：{err}"));
+            self.bus
+                .warn(format!("回执保存失败，这条报告留在队列：{err}"));
             return;
         }
         let merged = if record.duplicate {
@@ -482,7 +498,12 @@ pub fn client_version(root: &Root) -> String {
     let mtime = fs::metadata(&exe)
         .and_then(|m| m.modified())
         .ok()
-        .and_then(|t| DateTime::<Local>::from(t).format("%Y%m%d").to_string().into());
+        .and_then(|t| {
+            DateTime::<Local>::from(t)
+                .format("%Y%m%d")
+                .to_string()
+                .into()
+        });
     mtime.unwrap_or_else(|| "未知版本".to_string())
 }
 
@@ -497,7 +518,11 @@ fn file_version(path: &Path) -> Option<String> {
     if !path.is_file() {
         return None;
     }
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     let name = PCWSTR::from_raw(wide.as_ptr());
     unsafe {
         let size = GetFileVersionInfoSizeW(name, None);
@@ -545,9 +570,10 @@ fn file_version(path: &Path) -> Option<String> {
         if value.is_null() || value_len == 0 {
             return None;
         }
-        let text = String::from_utf16_lossy(
-            std::slice::from_raw_parts(value, (value_len as usize).saturating_sub(1)),
-        );
+        let text = String::from_utf16_lossy(std::slice::from_raw_parts(
+            value,
+            (value_len as usize).saturating_sub(1),
+        ));
         Some(text.trim().to_string())
     }
 }
@@ -565,27 +591,31 @@ pub fn environment() -> String {
 /// 系统名读注册表的 CurrentVersion（一次 `reg query` 拿全三个值，结果常驻）。
 fn windows_name() -> String {
     static CACHED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    CACHED.get_or_init(|| {
-        let mut found = Vec::new();
-        if let Ok(out) = procutil::run_capture(
-            &Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()))
-                .join("System32")
-                .join("reg.exe"),
-            &["query", r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion"],
-            Duration::from_secs(5),
-        ) {
-            for name in ["ProductName", "DisplayVersion", "CurrentBuildNumber"] {
-                if let Some(value) = reg_value(&out, name) {
-                    found.push(value);
+    CACHED
+        .get_or_init(|| {
+            let mut found = Vec::new();
+            if let Ok(out) = procutil::run_capture(
+                &Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()))
+                    .join("System32")
+                    .join("reg.exe"),
+                &[
+                    "query",
+                    r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+                ],
+                Duration::from_secs(5),
+            ) {
+                for name in ["ProductName", "DisplayVersion", "CurrentBuildNumber"] {
+                    if let Some(value) = reg_value(&out, name) {
+                        found.push(value);
+                    }
                 }
             }
-        }
-        if found.is_empty() {
-            return "Windows".to_string();
-        }
-        chars(&found.join(" "), 480)
-    })
-    .clone()
+            if found.is_empty() {
+                return "Windows".to_string();
+            }
+            chars(&found.join(" "), 480)
+        })
+        .clone()
 }
 
 /// `reg query` 的一行长这样：`    ProductName    REG_SZ    Windows 10 Pro`。
@@ -626,7 +656,9 @@ pub fn request_key(stage: &str) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let mut x = now.as_nanos() as u64 ^ n.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((std::process::id() as u64) << 17);
+    let mut x = now.as_nanos() as u64
+        ^ n.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ ((std::process::id() as u64) << 17);
     // splitmix64：没有随机数依赖时也要保证跨机器不撞号。
     x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     let mut z = x;
@@ -856,8 +888,16 @@ fn base64(bytes: &[u8]) -> String {
         let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
         out.push(TABLE[(n >> 18 & 63) as usize] as char);
         out.push(TABLE[(n >> 12 & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6 & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6 & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }

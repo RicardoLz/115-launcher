@@ -6,9 +6,7 @@
 use serde::Serialize;
 
 use crate::config;
-use crate::paths::{
-    has_client_files, sk_dat_size, Root, SK_DAT_REAL_MIN_BYTES, GATEWAY_PORT,
-};
+use crate::paths::{has_client_files, sk_dat_size, Root, GATEWAY_PORT, SK_DAT_REAL_MIN_BYTES};
 use crate::portguard;
 use crate::procutil;
 
@@ -45,7 +43,11 @@ pub fn check(root: &Root) -> Report {
     items.push(item(
         "app.root",
         "整合包目录",
-        if root.path.is_dir() { Level::Ok } else { Level::Error },
+        if root.path.is_dir() {
+            Level::Ok
+        } else {
+            Level::Error
+        },
         root.path.display().to_string(),
         format!("识别方式：{}", root.source),
     ));
@@ -109,7 +111,11 @@ pub fn check(root: &Root) -> Report {
     items.push(item(
         "client.dir",
         "游戏客户端",
-        if client_dir.is_dir() { Level::Ok } else { Level::Error },
+        if client_dir.is_dir() {
+            Level::Ok
+        } else {
+            Level::Error
+        },
         client_dir.display().to_string(),
         if client_dir.is_dir() {
             String::new()
@@ -149,7 +155,11 @@ pub fn check(root: &Root) -> Report {
     items.push(item(
         "server.orchestrator",
         "会话编排程序",
-        if orchestrator.is_file() { Level::Ok } else { Level::Error },
+        if orchestrator.is_file() {
+            Level::Ok
+        } else {
+            Level::Error
+        },
         orchestrator.display().to_string(),
         if orchestrator.is_file() {
             String::new()
@@ -162,7 +172,11 @@ pub fn check(root: &Root) -> Report {
     items.push(item(
         "server.gateway",
         "网关程序",
-        if gateway.is_file() { Level::Ok } else { Level::Error },
+        if gateway.is_file() {
+            Level::Ok
+        } else {
+            Level::Error
+        },
         gateway.display().to_string(),
         String::new(),
     ));
@@ -171,7 +185,11 @@ pub fn check(root: &Root) -> Report {
     items.push(item(
         "server.profile",
         "服务端默认配置",
-        if profile.is_file() { Level::Ok } else { Level::Error },
+        if profile.is_file() {
+            Level::Ok
+        } else {
+            Level::Error
+        },
         profile.display().to_string(),
         String::new(),
     ));
@@ -180,7 +198,11 @@ pub fn check(root: &Root) -> Report {
     items.push(item(
         "server.probe",
         "网络隔离探针",
-        if probe.is_file() { Level::Ok } else { Level::Warn },
+        if probe.is_file() {
+            Level::Ok
+        } else {
+            Level::Warn
+        },
         probe.display().to_string(),
         "原生启动用不到它；调试模式与部分排障功能需要".to_string(),
     ));
@@ -189,7 +211,11 @@ pub fn check(root: &Root) -> Report {
     items.push(item(
         "port.gateway",
         format!("网关端口 {GATEWAY_PORT}"),
-        if report.gateway.listening { Level::Error } else { Level::Ok },
+        if report.gateway.listening {
+            Level::Error
+        } else {
+            Level::Ok
+        },
         report.summary.clone(),
         if report.gateway.listening {
             portguard::cleanup_hint(root, &report)
@@ -205,7 +231,11 @@ pub fn check(root: &Root) -> Report {
         "client.running",
         "游戏进程",
         if game_running { Level::Warn } else { Level::Ok },
-        if game_running { "已在运行".to_string() } else { "未运行".to_string() },
+        if game_running {
+            "已在运行".to_string()
+        } else {
+            "未运行".to_string()
+        },
         String::new(),
     ));
 

@@ -648,6 +648,16 @@ export interface GmCharacter {
 export interface GmGrantItem {
   template: number;
   amount: number;
+  /** 强化等级 0..31；增幅与它共用同一格，有红字时客户端渲染成「增幅 +N」。 */
+  upgrade?: number;
+  /** 增幅属性：1 体力 2 精神 3 力量 4 智力（0 = 无红字）。 */
+  amplify?: number;
+  /** 红字数值；0 = 客户端不显示那行「力量 +N」。 */
+  amplify_value?: number;
+  /** 锻造等级 0..8，仅武器；顶层 refine 是服务端权威字段。 */
+  refine?: number;
+  /** 耐久覆盖；0 = 按装备目录定义。 */
+  durability?: number;
 }
 
 /** 角色详情头部：职业名由客户端职业名表推导，不直接读 profession。 */

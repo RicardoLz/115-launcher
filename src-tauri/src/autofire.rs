@@ -193,23 +193,41 @@ pub fn key_options() -> Vec<KeyOption> {
     let mut out: Vec<KeyOption> = Vec::new();
     for c in b'A'..=b'Z' {
         let name = char::from(c).to_string();
-        out.push(KeyOption { label: name.clone(), value: name });
+        out.push(KeyOption {
+            label: name.clone(),
+            value: name,
+        });
     }
     for c in b'0'..=b'9' {
         let name = char::from(c).to_string();
-        out.push(KeyOption { label: name.clone(), value: name });
+        out.push(KeyOption {
+            label: name.clone(),
+            value: name,
+        });
     }
     for i in 1..=12 {
-        out.push(KeyOption { label: format!("F{i}"), value: format!("F{i}") });
+        out.push(KeyOption {
+            label: format!("F{i}"),
+            value: format!("F{i}"),
+        });
     }
     for i in 0..=9 {
-        out.push(KeyOption { label: format!("小键盘{i}"), value: format!("NUM{i}") });
+        out.push(KeyOption {
+            label: format!("小键盘{i}"),
+            value: format!("NUM{i}"),
+        });
     }
     for (value, label) in [("LEFT", "←"), ("UP", "↑"), ("RIGHT", "→"), ("DOWN", "↓")] {
-        out.push(KeyOption { label: label.to_string(), value: value.to_string() });
+        out.push(KeyOption {
+            label: label.to_string(),
+            value: value.to_string(),
+        });
     }
     for name in ["SPACE", "TAB", "PAUSE", "SCROLL", "SNAPSHOT", "OEM3"] {
-        out.push(KeyOption { label: name.to_string(), value: name.to_string() });
+        out.push(KeyOption {
+            label: name.to_string(),
+            value: name.to_string(),
+        });
     }
     out
 }
@@ -274,7 +292,9 @@ pub fn validate(cfg: &Config) -> Result<(), String> {
                     .map_err(|err| format!("{label} 第 {} 步：{err}", step_index + 1))?;
             }
             if trigger == hotkey {
-                return Err(format!("{label} 的触发键和总开关热键撞了，按下去只会开关整个功能"));
+                return Err(format!(
+                    "{label} 的触发键和总开关热键撞了，按下去只会开关整个功能"
+                ));
             }
             for (seen, seen_index) in &rapid_keys {
                 if *seen == trigger {
@@ -325,10 +345,7 @@ pub fn save(root: &Root, cfg: &Config) -> Result<(), String> {
                 section.insert(key, value);
             }
         }
-        section.insert(
-            "autoPickup".to_string(),
-            serde_json::Value::Bool(pickup),
-        );
+        section.insert("autoPickup".to_string(), serde_json::Value::Bool(pickup));
     })
 }
 
@@ -576,15 +593,24 @@ impl Engine {
         let keep_up = Arc::clone(&self.keep_up);
         let log = Arc::clone(&self.log);
         let mut handles = lock_handles(&self.handles);
-        handles.push(spawn("af-listener", live.clone(), keep_up.clone(), move |live, keep_up| {
-            listener_loop(live, keep_up)
-        }));
-        handles.push(spawn("af-sender", live.clone(), keep_up.clone(), move |live, keep_up| {
-            sender_loop(live, keep_up)
-        }));
-        handles.push(spawn("af-player", live.clone(), keep_up.clone(), move |live, keep_up| {
-            player_loop(live, keep_up, rx)
-        }));
+        handles.push(spawn(
+            "af-listener",
+            live.clone(),
+            keep_up.clone(),
+            move |live, keep_up| listener_loop(live, keep_up),
+        ));
+        handles.push(spawn(
+            "af-sender",
+            live.clone(),
+            keep_up.clone(),
+            move |live, keep_up| sender_loop(live, keep_up),
+        ));
+        handles.push(spawn(
+            "af-player",
+            live.clone(),
+            keep_up.clone(),
+            move |live, keep_up| player_loop(live, keep_up, rx),
+        ));
         handles.push(spawn("af-flush", live, keep_up, move |live, keep_up| {
             flusher_loop(live, keep_up, log)
         }));
@@ -728,7 +754,9 @@ fn flush_diag(log: &Mutex<Option<LogLine>>, live: &Arc<Mutex<Live>>) {
     if lines.is_empty() {
         return;
     }
-    let Some(sink) = held(log).clone() else { return };
+    let Some(sink) = held(log).clone() else {
+        return;
+    };
     for line in lines {
         sink(format!("[连发] {line}"));
     }
@@ -754,13 +782,19 @@ fn flush_live(log: &Mutex<Option<LogLine>>, live: &Arc<Mutex<Live>>) {
             guard.skip_focus,
         )
     };
-    let Some(sink) = held(log).clone() else { return };
+    let Some(sink) = held(log).clone() else {
+        return;
+    };
     sink(format!("[连发] {line}"));
 }
 
 /// 诊断与实况的专用线程。它不碰输入、不发消息，200ms 起一次，
 /// 唯一的存在理由是把「只有界面开着才会写日志」这件事从日志链路里拿掉。
-fn flusher_loop(live: Arc<Mutex<Live>>, keep_up: Arc<AtomicBool>, log: Arc<Mutex<Option<LogLine>>>) {
+fn flusher_loop(
+    live: Arc<Mutex<Live>>,
+    keep_up: Arc<AtomicBool>,
+    log: Arc<Mutex<Option<LogLine>>>,
+) {
     loop {
         if !keep_up.load(Ordering::SeqCst) {
             break;
@@ -790,10 +824,14 @@ fn fill(guard: &mut Live, cfg: &Config, master_vk: u16, combo_tx: Option<SyncSen
             continue;
         }
         if entry.kind == "combo" {
-            let Ok(trigger) = parse_key(&entry.trigger) else { continue };
+            let Ok(trigger) = parse_key(&entry.trigger) else {
+                continue;
+            };
             let mut steps = Vec::new();
             for step in &entry.steps {
-                let Ok(vk) = parse_key(&step.key) else { continue };
+                let Ok(vk) = parse_key(&step.key) else {
+                    continue;
+                };
                 steps.push((
                     vk,
                     Duration::from_millis(u64::from(step.hold_ms)),
@@ -811,7 +849,9 @@ fn fill(guard: &mut Live, cfg: &Config, master_vk: u16, combo_tx: Option<SyncSen
                 taps: 0,
             });
         } else {
-            let Ok(vk) = parse_key(&entry.key) else { continue };
+            let Ok(vk) = parse_key(&entry.key) else {
+                continue;
+            };
             guard.rapids.push(Rapid {
                 label: index,
                 vk,
@@ -899,12 +939,10 @@ fn listener_loop(live: Arc<Mutex<Live>>, _keep_up: Arc<AtomicBool>) {
             // 挂在这里一次按键能翻七八下（2026-10-15 实机日志里 21:47:09 一秒内翻了 6 次）。
             windows::Win32::UI::WindowsAndMessaging::WM_HOTKEY => {}
             WM_REREG_HOTKEY => register_master(&live),
-            _ => {
-                unsafe {
-                    let _ = TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
-                }
-            }
+            _ => unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            },
         }
     }
 
@@ -1119,11 +1157,19 @@ fn tick(live: &Arc<Mutex<Live>>) {
         if !guard.master {
             guard.skip_master += 1;
             let hotkey = guard.cfg.hotkey.clone();
-            note_diag(&mut guard, "gate-master", format!("总开关关着，连发没发送：按一下 {hotkey} 开"));
+            note_diag(
+                &mut guard,
+                "gate-master",
+                format!("总开关关着，连发没发送：按一下 {hotkey} 开"),
+            );
         } else {
             guard.skip_focus += 1;
             let targets = guard.cfg.targets.join("、");
-            note_diag(&mut guard, "gate-focus", format!("游戏不在前台，连发没发送：找的是 {targets}"));
+            note_diag(
+                &mut guard,
+                "gate-focus",
+                format!("游戏不在前台，连发没发送：找的是 {targets}"),
+            );
         }
     }
 
@@ -1174,7 +1220,9 @@ fn tick(live: &Arc<Mutex<Live>>) {
     let mut fail: Option<String> = None;
     for (index, up, err) in tried {
         // 放锁的这几毫秒里配置可能被重灌（连发条目换了），按下标回写前先确认这条还在。
-        let Some(rapid) = guard.rapids.get_mut(index) else { continue };
+        let Some(rapid) = guard.rapids.get_mut(index) else {
+            continue;
+        };
         match (up, err) {
             (false, None) => {
                 rapid.phase = Phase::Down(now);
@@ -1245,8 +1293,8 @@ fn scan_focus(_targets: &[String]) -> Scan {
 fn send_scan(vk: u16, up: bool) -> Result<(), String> {
     use windows::Win32::Foundation::GetLastError;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT_0, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-        KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, MapVirtualKeyW, VIRTUAL_KEY,
+        MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, VIRTUAL_KEY,
     };
 
     let mapped = unsafe { MapVirtualKeyW(u32::from(vk), MAPVK_VK_TO_VSC) } as u16 & 0xFF;
@@ -1309,11 +1357,7 @@ fn release_key(vk: u16) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn player_loop(
-    live: Arc<Mutex<Live>>,
-    keep_up: Arc<AtomicBool>,
-    rx: mpsc::Receiver<usize>,
-) {
+fn player_loop(live: Arc<Mutex<Live>>, keep_up: Arc<AtomicBool>, rx: mpsc::Receiver<usize>) {
     while keep_up.load(Ordering::SeqCst) {
         let Ok(index) = rx.recv() else { break };
         play_combo(&live, index);
@@ -1469,7 +1513,11 @@ mod tests {
                 Entry {
                     kind: "combo".to_string(),
                     trigger: "Z".to_string(),
-                    steps: vec![Step { key: "X".to_string(), hold_ms: 30, gap_ms: 40 }],
+                    steps: vec![Step {
+                        key: "X".to_string(),
+                        hold_ms: 30,
+                        gap_ms: 40,
+                    }],
                     enabled: true,
                     ..Default::default()
                 },
@@ -1536,7 +1584,10 @@ mod tests {
         for _ in 0..30 {
             note_key(&live, 0x79, true);
         }
-        assert!(!lock(&live).master, "按住时系统会重发按下边沿，一个都不许翻");
+        assert!(
+            !lock(&live).master,
+            "按住时系统会重发按下边沿，一个都不许翻"
+        );
         note_key(&live, 0x79, false);
         assert!(lock(&live).master, "一次按键只有一次松开，松开该翻");
         let lines = lock(&live).diag.clone();
@@ -1564,7 +1615,10 @@ mod tests {
         let view = engine.set_master(false).expect("在跑就该受理");
         assert!(!view.master, "界面点关，抄出来的状态就得是关");
         assert!(
-            lock(&live).diag.iter().any(|line| line.contains("界面里点的")),
+            lock(&live)
+                .diag
+                .iter()
+                .any(|line| line.contains("界面里点的")),
             "点的来路要写进日志：{:?}",
             lock(&live).diag
         );
@@ -1578,12 +1632,24 @@ mod tests {
         // 共用一个节流闸门时的真实形状：先记「游戏不在前台」，同 3 秒里的第一条发送失败
         // 就被吞掉了——而那条才是「发不出去」的唯一证据。
         let live = Arc::new(Mutex::new(Live::default()));
-        note_diag(&mut lock(&live), "gate-focus", "游戏不在前台，连发没发送".to_string());
-        note_diag(&mut lock(&live), "fail", "注入失败：Access is denied".to_string());
+        note_diag(
+            &mut lock(&live),
+            "gate-focus",
+            "游戏不在前台，连发没发送".to_string(),
+        );
+        note_diag(
+            &mut lock(&live),
+            "fail",
+            "注入失败：Access is denied".to_string(),
+        );
         let lines = lock(&live).diag.clone();
         assert_eq!(lines.len(), 2, "两类话各留一句，谁也别挡谁：{:?}", lines);
         // 同一类仍然节流：按住键的那几秒不能把日志冲烂。
-        note_diag(&mut lock(&live), "fail", "注入失败：Access is denied".to_string());
+        note_diag(
+            &mut lock(&live),
+            "fail",
+            "注入失败：Access is denied".to_string(),
+        );
         assert_eq!(lock(&live).diag.len(), 2, "同一类 3 秒内只许一句");
     }
 

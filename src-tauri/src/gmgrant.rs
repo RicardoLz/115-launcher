@@ -148,9 +148,9 @@ mod blob_field {
             Some(Value::Array(xs)) => {
                 let mut out = Vec::with_capacity(xs.len());
                 for x in xs {
-                    let n = x.as_u64().ok_or_else(|| {
-                        serde::de::Error::custom("invalid byte array element")
-                    })?;
+                    let n = x
+                        .as_u64()
+                        .ok_or_else(|| serde::de::Error::custom("invalid byte array element"))?;
                     out.push(n as u8);
                 }
                 Ok(Some(Blob(out)))
@@ -173,8 +173,16 @@ fn b64_encode(bytes: &[u8]) -> String {
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         out.push(B64_CHARS[(n >> 18) as usize & 63] as char);
         out.push(B64_CHARS[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { B64_CHARS[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { B64_CHARS[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            B64_CHARS[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            B64_CHARS[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -238,8 +246,8 @@ fn zero_range(v: &[u16; 2]) -> bool {
 
 impl BagRules {
     fn from_json(raw: &str) -> Result<BagRules, String> {
-        let r: BagRules = serde_json::from_str(raw)
-            .map_err(|e| format!("解析背包规则失败：{e}"))?;
+        let r: BagRules =
+            serde_json::from_str(raw).map_err(|e| format!("解析背包规则失败：{e}"))?;
         if r.model != "reference90-bag-v1" || r.missing_stack_limit == 0 || r.source.len() != 64 {
             return Err("invalid bag policy".into());
         }
@@ -414,7 +422,12 @@ impl EquipCatalog {
         if depth >= 8 {
             return Err(format!("equipment import chain too deep at {id}"));
         }
-        let target = import_target(row.fields.get("[import script]").map(|v| &v[..]).unwrap_or(&[]));
+        let target = import_target(
+            row.fields
+                .get("[import script]")
+                .map(|v| &v[..])
+                .unwrap_or(&[]),
+        );
         let Some(target) = target.filter(|t| *t != id) else {
             return Ok(row.clone());
         };
@@ -440,11 +453,19 @@ impl EquipCatalog {
     fn reward(&self, id: u32) -> Result<u16, String> {
         let row = self.definition_resolved(id, 0)?;
         let rarity = row.fields.get("[rarity]").map(|v| &v[..]).unwrap_or(&[]);
-        let kind = row.fields.get("[equipment type]").map(|v| &v[..]).unwrap_or(&[]);
+        let kind = row
+            .fields
+            .get("[equipment type]")
+            .map(|v| &v[..])
+            .unwrap_or(&[]);
         if rarity.len() != 1 || rarity[0].kind != 0 || rarity[0].value < 0 || kind.is_empty() {
             return Err("special equipment reward requires additional source state".into());
         }
-        let dur = row.fields.get("[durability]").map(|v| &v[..]).unwrap_or(&[]);
+        let dur = row
+            .fields
+            .get("[durability]")
+            .map(|v| &v[..])
+            .unwrap_or(&[]);
         if dur.is_empty() {
             if durability_optional(&kind[0].text) {
                 return Ok(0);
@@ -460,7 +481,11 @@ impl EquipCatalog {
     /// 分类用：[equipment type] 首项文本（也走继承链，与 Go Grant 一致）。
     fn kind_text(&self, id: u32) -> Result<Option<String>, String> {
         let row = self.definition_resolved(id, 0)?;
-        let kind = row.fields.get("[equipment type]").map(|v| &v[..]).unwrap_or(&[]);
+        let kind = row
+            .fields
+            .get("[equipment type]")
+            .map(|v| &v[..])
+            .unwrap_or(&[]);
         Ok(kind.first().map(|t| t.text.clone()))
     }
 }
@@ -479,11 +504,7 @@ pub struct BagItem {
     pub template: u32,
     #[serde(rename = "Amount", alias = "amount")]
     pub amount: u32,
-    #[serde(
-        alias = "ExpireTime",
-        default,
-        skip_serializing_if = "is_zero_u32"
-    )]
+    #[serde(alias = "ExpireTime", default, skip_serializing_if = "is_zero_u32")]
     pub expire_time: u32,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -606,9 +627,7 @@ fn validate_record(it: &BagEquipment) -> Result<(), String> {
         if rec.len() != 0 && rec.len() != RECORD_SIZE {
             return Err("invalid equipment instance record".into());
         }
-        if rec.len() == RECORD_SIZE
-            && rec.le_u32_at(2).is_some_and(|t| t != it.template)
-        {
+        if rec.len() == RECORD_SIZE && rec.le_u32_at(2).is_some_and(|t| t != it.template) {
             return Err("equipment instance template mismatch".into());
         }
     }
@@ -627,8 +646,8 @@ pub fn read_bag(state: &Value) -> Result<Bag, String> {
         .ok_or_else(|| "character state is not an object".to_string())?;
     let mut b: Bag = match fields.get("inventory") {
         Some(raw) => {
-            let b: Bag =
-                serde_json::from_value(raw.clone()).map_err(|_| "不支持的背包存档版本".to_string())?;
+            let b: Bag = serde_json::from_value(raw.clone())
+                .map_err(|_| "不支持的背包存档版本".to_string())?;
             if b.version != "ordinary-bag-v1" {
                 return Err("unsupported saved inventory".into());
             }
@@ -838,6 +857,109 @@ pub fn add_special_award(b: &mut Bag, space: u8, id: u32, amount: u32) -> Result
     Ok(slots)
 }
 
+/// 装备实例行（181 字节）里的打造字段，与服务端 internal/inventory/amplify.go、
+/// configs/refine.json 的布局逐字对齐：
+///
+///	offset 10 : 强化/增幅共用等级（bit0-4 = 0..31，bit5-7 = 再封装次数，保留）
+///	offset 19 : 红字属性类型（1 体力 2 精神 3 力量 4 智力；0 = 无）
+///	offset 20 : 红字数值（客户端把 0 当「没有次元属性数值」）
+///	offset 76 : 锻造镜像（refine.json 的 record_offset；顶层 refine 才是权威字段）
+const REINFORCE_LEVEL_OFFSET: usize = 10;
+const REINFORCE_LEVEL_MASK: u8 = 0x1f;
+const AMPLIFY_TYPE_OFFSET: usize = 19;
+const AMPLIFY_VALUE_OFFSET: usize = 20;
+const REFINE_RECORD_OFFSET: usize = 76;
+const REFINE_MAX_LEVEL: u8 = 8;
+
+/// 发放装备时的打造参数（对齐服务端 `EditGMEquipment` 的四把旋钮）。
+#[derive(Clone, Copy, Default, Debug)]
+pub struct EquipCraft {
+    pub upgrade: u8,
+    pub amplify: u8,
+    pub amplify_value: u8,
+    pub refine: u8,
+}
+
+impl EquipCraft {
+    fn has_any(&self) -> bool {
+        self.upgrade != 0 || self.amplify != 0 || self.refine != 0
+    }
+}
+
+/// 物化一份带打造状态的 181 字节实例行（服务端 SetCraftedStatus 的口径：
+/// OrdinaryItem 底 + offset10 低五位等级 + 红字两格 + 锻造镜像）。
+fn crafted_record(slot: u16, template: u32, durability: u16, craft: EquipCraft) -> Blob {
+    let mut row = [0u8; RECORD_SIZE];
+    row[0..2].copy_from_slice(&slot.to_le_bytes());
+    row[2..6].copy_from_slice(&template.to_le_bytes());
+    row[11..13].copy_from_slice(&durability.to_le_bytes());
+    row[REINFORCE_LEVEL_OFFSET] = (row[REINFORCE_LEVEL_OFFSET] & !REINFORCE_LEVEL_MASK)
+        | (craft.upgrade & REINFORCE_LEVEL_MASK);
+    row[AMPLIFY_TYPE_OFFSET] = craft.amplify;
+    row[AMPLIFY_VALUE_OFFSET] = if craft.amplify == 0 {
+        0
+    } else {
+        craft.amplify_value
+    };
+    if craft.refine > 0 {
+        row[REFINE_RECORD_OFFSET] = craft.refine;
+    }
+    Blob(row.to_vec())
+}
+
+/// 发放前的打造参数门（对齐服务端 EditGMEquipment 的类型清单）：
+/// 普通装备三类才能强化/增幅，锻造仅武器，时装与宠物一律拒绝。
+/// 没带参数时原样放行（耐久覆盖不进这道门，它不写实例行）。
+fn equip_craft_for(catalog: &EquipCatalog, it: &GrantItem) -> Result<EquipCraft, String> {
+    let craft = EquipCraft {
+        upgrade: it.upgrade,
+        amplify: it.amplify,
+        amplify_value: it.amplify_value,
+        refine: it.refine,
+    };
+    if !craft.has_any() {
+        return Ok(craft);
+    }
+    if craft.upgrade > 31 {
+        return Err(format!("强化等级范围是 0..31（收到 {}）", craft.upgrade));
+    }
+    if craft.amplify > 4 {
+        return Err(format!(
+            "增幅属性取值是 1..4（体力/精神/力量/智力，收到 {}）",
+            craft.amplify
+        ));
+    }
+    if craft.refine > REFINE_MAX_LEVEL {
+        return Err(format!(
+            "锻造等级上限 +{REFINE_MAX_LEVEL}（收到 {}）",
+            craft.refine
+        ));
+    }
+    let kind = catalog
+        .kind_text(it.template)?
+        .ok_or_else(|| "物品缺少装备类型".to_string())?;
+    if equipment_bag_space(&kind) != 0 {
+        return Err(format!(
+            "物品 {} 是时装或宠物装备，不支持打造参数",
+            it.template
+        ));
+    }
+    match kind.as_str() {
+        "[weapon]" | "[coat]" | "[shoulder]" | "[pants]" | "[shoes]" | "[waist]" | "[amulet]"
+        | "[wrist]" | "[ring]" | "[support]" | "[magic stone]" | "[earring]" => {}
+        _ => {
+            return Err(format!(
+                "物品 {} 的类型 {kind} 不支持强化/增幅",
+                it.template
+            ))
+        }
+    }
+    if craft.refine > 0 && kind != "[weapon]" {
+        return Err(format!("物品 {} 不是武器，不支持锻造", it.template));
+    }
+    Ok(craft)
+}
+
 /// Go Bag.AddEquipment：占用集是 items ∪ equipment，行按升序补齐。
 pub fn add_equipment(
     b: &mut Bag,
@@ -845,9 +967,13 @@ pub fn add_equipment(
     id: u32,
     count: u32,
     durability: u16,
+    craft: EquipCraft,
 ) -> Result<Vec<u16>, String> {
     let slots = rules.equipment_slots.unwrap_or([0, 0]);
-    if slots[0] == 0 || slots[0] > slots[1] || count == 0 || count > (slots[1] - slots[0] + 1) as u32
+    if slots[0] == 0
+        || slots[0] > slots[1]
+        || count == 0
+        || count > (slots[1] - slots[0] + 1) as u32
     {
         return Err("invalid equipment award".into());
     }
@@ -871,16 +997,21 @@ pub fn add_equipment(
         return Err("equipment bag is full".into());
     }
     for n in available.clone() {
+        let record = if craft.has_any() {
+            Some(crafted_record(n, id, durability, craft))
+        } else {
+            None
+        };
         b.equipment.push(BagEquipment {
             slot: n,
             template: id,
             group: 0,
             durability,
-            record: None,
+            record,
             avatar_options: None,
             avatar_sockets: None,
             period: 0,
-            refine: 0,
+            refine: craft.refine,
             extra: Map::new(),
         });
     }
@@ -1038,10 +1169,26 @@ impl AccountMaterials {
 // 发放请求 / 回执（字段顺序与 Go json.Marshal 逐字对齐，流水号重试按字节比对）
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GrantItem {
     pub template: u32,
     pub amount: u32,
+    /// 强化等级（装备实例行 offset10 低五位，0..31）。增幅与它共用同一格：
+    /// 行带红字时客户端把它渲染成「增幅 +N」，否则是「强化 +N」。
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub upgrade: u8,
+    /// 增幅属性类型（1 体力 2 精神 3 力量 4 智力；0 = 无红字）。
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub amplify: u8,
+    /// 红字数值（offset20）；0 = 客户端不显示「力量 +N」那一行。
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub amplify_value: u8,
+    /// 锻造等级（仅武器，0..8）：顶层 `refine` 是服务端权威字段，行内另有镜像。
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub refine: u8,
+    /// 耐久覆盖（0 = 按装备目录的 [durability]）。
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub durability: u16,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1158,17 +1305,20 @@ fn take_lease_best_effort(db: &Path) -> LeaseGuard {
 // 事务本体
 // ---------------------------------------------------------------------------
 
-const SQL_CLAIM: &str = "INSERT INTO admin_grants(grant_id,account_id,character_id,request,receipt,operator,reason) \
+const SQL_CLAIM: &str =
+    "INSERT INTO admin_grants(grant_id,account_id,character_id,request,receipt,operator,reason) \
  VALUES(?1,?2,?3,?4,CAST('{}' AS BLOB),?5,?6) ON CONFLICT(grant_id) DO NOTHING";
 const SQL_REPLAY: &str = "SELECT request=?2,receipt FROM admin_grants WHERE grant_id=?1";
 const SQL_CERA_ENSURE: &str = "INSERT INTO account_currency(account_id,cera) VALUES(?1,0) ON CONFLICT (account_id) DO NOTHING";
 const SQL_CERA_UPDATE: &str = "UPDATE account_currency SET cera=cera+?2,updated_at=(CAST((julianday('now') - 2440587.5) * 86400000000 AS INTEGER)) \
  WHERE account_id=?1 RETURNING cera";
-const SQL_CERA_READ: &str = "SELECT coalesce((SELECT cera FROM account_currency WHERE account_id=?1), 0)";
+const SQL_CERA_READ: &str =
+    "SELECT coalesce((SELECT cera FROM account_currency WHERE account_id=?1), 0)";
 const SQL_CHARACTER: &str = "SELECT id,account_id,state FROM characters WHERE account_id=?1 AND id=?2 AND deleted_at IS NULL";
 /// 养成写侧的第二读：同一行的 profession 与 config_version（身份门要用）。
 const SQL_STATE_WRITE: &str = "UPDATE characters SET state=?2 WHERE id=?1";
-const SQL_MATERIALS_ENSURE: &str = "INSERT INTO account_material_storage(account_id) VALUES(?1) ON CONFLICT DO NOTHING";
+const SQL_MATERIALS_ENSURE: &str =
+    "INSERT INTO account_material_storage(account_id) VALUES(?1) ON CONFLICT DO NOTHING";
 const SQL_MATERIALS_READ: &str = "SELECT counts FROM account_material_storage WHERE account_id=?1";
 const SQL_MATERIALS_SAVE: &str = "UPDATE account_material_storage SET counts=?2,updated_at=(CAST((julianday('now') - 2440587.5) * 86400000000 AS INTEGER)) WHERE account_id=?1";
 const SQL_RECEIPT_WRITE: &str = "UPDATE admin_grants SET receipt=?2 WHERE grant_id=?1";
@@ -1176,7 +1326,10 @@ const SQL_RECEIPT_WRITE: &str = "UPDATE admin_grants SET receipt=?2 WHERE grant_
 /// 分类结果：可堆叠自带落格口径（类型串 + 堆叠上限），装备按容器分流。
 #[derive(Clone, PartialEq)]
 pub enum GrantPlan {
-    Stackable { type_text: Option<String>, stack_limit: u32 },
+    Stackable {
+        type_text: Option<String>,
+        stack_limit: u32,
+    },
     Equipment,
     Special(u8),
 }
@@ -1233,7 +1386,10 @@ fn apply_to_character(
             continue;
         }
         match classify(it.template)? {
-            GrantPlan::Stackable { type_text, stack_limit } => {
+            GrantPlan::Stackable {
+                type_text,
+                stack_limit,
+            } => {
                 let slot = bag_add(
                     &mut bag,
                     rules,
@@ -1263,11 +1419,17 @@ fn apply_to_character(
                     *equip = Some(EquipCatalog::load(equip_dir, &rules.source)?);
                 }
                 let catalog = equip.as_ref().expect("loaded above");
-                let durability = catalog
+                let mut durability = catalog
                     .reward(it.template)
                     .map_err(|e| format!("item {}: {e}", it.template))?;
-                let slots = add_equipment(&mut bag, rules, it.template, it.amount, durability)
+                if it.durability > 0 {
+                    durability = it.durability;
+                }
+                let craft = equip_craft_for(catalog, it)
                     .map_err(|e| format!("item {}: {e}", it.template))?;
+                let slots =
+                    add_equipment(&mut bag, rules, it.template, it.amount, durability, craft)
+                        .map_err(|e| format!("item {}: {e}", it.template))?;
                 r.items.push(AwardReceipt {
                     template: it.template,
                     amount: it.amount,
@@ -1369,9 +1531,7 @@ fn backup_state_before(
 /// 其余——包括以后新增的动作——一律先备份。
 /// 宁可多留一份没人用的文件，也不能少一份能救命的。
 fn writes_character_state(action: &str) -> bool {
-    !crate::gmquest::is_quest_action(action)
-        && action != "materials.set"
-        && action != "mail.send"
+    !crate::gmquest::is_quest_action(action) && action != "materials.set" && action != "mail.send"
 }
 
 /// 把备份落点盖进管理动作的回执（JSON 对象才盖；不是对象就说明这一档的回执形状有问题，不硬塞）。
@@ -1435,8 +1595,10 @@ pub fn characters(root: &Root) -> Result<Vec<GmCharacter>, String> {
     )
     .map_err(|e| format!("打不开存档（{}）：{e}", db.display()))?;
     let mut stmt = conn
-        .prepare("SELECT c.id,c.account_id,a.username,c.name,c.profession FROM characters c \
-                  JOIN accounts a ON a.id=c.account_id WHERE c.deleted_at IS NULL ORDER BY c.id")
+        .prepare(
+            "SELECT c.id,c.account_id,a.username,c.name,c.profession FROM characters c \
+                  JOIN accounts a ON a.id=c.account_id WHERE c.deleted_at IS NULL ORDER BY c.id",
+        )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
@@ -1449,7 +1611,8 @@ pub fn characters(root: &Root) -> Result<Vec<GmCharacter>, String> {
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// 发放流水一行：只读 `admin_grants`。界面默认只看流水号 / 动作 / 角色 / 时间，
@@ -1483,7 +1646,10 @@ fn grant_action(request: &Value) -> String {
     if let Some(action) = request.get("action").and_then(Value::as_str) {
         return action.to_string();
     }
-    let nested = request.get("reason").and_then(Value::as_str).unwrap_or_default();
+    let nested = request
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if let Ok(doc) = serde_json::from_str::<Value>(nested) {
         if let Some(action) = doc.get("action").and_then(Value::as_str) {
             return action.to_string();
@@ -1534,7 +1700,8 @@ pub fn grant_log(conn: &rusqlite::Connection) -> Result<Vec<GmGrantRecord>, Stri
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// 与 `characters` 同一把只读钥匙：不领租约、不写一个字节，服务端在跑也读得动。
@@ -1602,7 +1769,8 @@ pub fn grant(root: &Root, shared: &GmShared, input: &GrantInput) -> Result<GmGra
     let request = serde_json::to_vec(&g).map_err(|e| e.to_string())?;
 
     let catalog = shared.ensure(root)?;
-    let dir = gmbuild::gmindex::find_configs(&root.path).ok_or_else(|| "未找到 GM 产物目录".to_string())?;
+    let dir = gmbuild::gmindex::find_configs(&root.path)
+        .ok_or_else(|| "未找到 GM 产物目录".to_string())?;
     let rules = BagRules::load(&dir)?;
     let db = current_db(root).ok_or_else(|| "存档还没有 SQLite 档：先启动一次游戏".to_string())?;
     let _lease = take_lease_best_effort(&db);
@@ -1674,18 +1842,31 @@ fn claim_flow(
     bad_target: &str,
     mismatch: &str,
 ) -> Result<Claim, String> {
-    let character_arg: Option<i64> = if g.character_id != 0 { Some(g.character_id) } else { None };
+    let character_arg: Option<i64> = if g.character_id != 0 {
+        Some(g.character_id)
+    } else {
+        None
+    };
     let claimed = tx
         .execute(
             SQL_CLAIM,
-            params![g.id, g.account_id, character_arg, request, g.operator, g.reason],
+            params![
+                g.id,
+                g.account_id,
+                character_arg,
+                request,
+                g.operator,
+                g.reason
+            ],
         )
         .map_err(|e| format!("{bad_target}：{e}"))?;
     if claimed != 0 {
         return Ok(Claim::Fresh);
     }
     let (same, stored): (i64, Vec<u8>) = tx
-        .query_row(SQL_REPLAY, params![g.id, request], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_row(SQL_REPLAY, params![g.id, request], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
         .map_err(|e| e.to_string())?;
     if same == 0 {
         return Err(mismatch.to_string());
@@ -1707,7 +1888,13 @@ pub(crate) fn grant_inner(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
 
-    let claim = claim_flow(&tx, g, request, "发放目标不是已知账号/角色", "流水号已用于不同发放");
+    let claim = claim_flow(
+        &tx,
+        g,
+        request,
+        "发放目标不是已知账号/角色",
+        "流水号已用于不同发放",
+    );
     let replay = match claim {
         Ok(Claim::Fresh) => None,
         Ok(Claim::Replay(stored)) => Some(stored),
@@ -1732,17 +1919,16 @@ pub(crate) fn grant_inner(
     if g.cera != 0 {
         tx.execute(SQL_CERA_ENSURE, params![g.account_id])
             .map_err(|e| e.to_string())?;
-        let new_balance: i64 = match tx.query_row(
-            SQL_CERA_UPDATE,
-            params![g.account_id, g.cera],
-            |row| row.get(0),
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                tx.rollback().ok();
-                return Err(format!("点券调整被拒（余额会被扣成负数？）：{e}"));
-            }
-        };
+        let new_balance: i64 =
+            match tx.query_row(SQL_CERA_UPDATE, params![g.account_id, g.cera], |row| {
+                row.get(0)
+            }) {
+                Ok(v) => v,
+                Err(e) => {
+                    tx.rollback().ok();
+                    return Err(format!("点券调整被拒（余额会被扣成负数？）：{e}"));
+                }
+            };
         if new_balance < 0 {
             tx.rollback().ok();
             return Err("点券调整被拒（余额会被扣成负数？）".into());
@@ -1750,7 +1936,9 @@ pub(crate) fn grant_inner(
         cera_after = new_balance as u64;
     } else {
         cera_after = tx
-            .query_row(SQL_CERA_READ, params![g.account_id], |row| row.get::<_, i64>(0))
+            .query_row(SQL_CERA_READ, params![g.account_id], |row| {
+                row.get::<_, i64>(0)
+            })
             .unwrap_or(0)
             .max(0) as u64;
     }
@@ -1786,21 +1974,14 @@ pub(crate) fn grant_inner(
                 return Err(e);
             }
         };
-        let (_updated, r) = match apply_to_character(
-            &tx,
-            g,
-            &state,
-            rules,
-            &mut equip_slot,
-            dir,
-            classify,
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                tx.rollback().ok();
-                return Err(e);
-            }
-        };
+        let (_updated, r) =
+            match apply_to_character(&tx, g, &state, rules, &mut equip_slot, dir, classify) {
+                Ok(v) => v,
+                Err(e) => {
+                    tx.rollback().ok();
+                    return Err(e);
+                }
+            };
         receipt = r;
         if let Some(path) = backup {
             receipt.state_backup = path.display().to_string();
@@ -1874,9 +2055,7 @@ pub async fn gm_inventory_status(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn gm_characters(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<GmCharacter>, String> {
+pub async fn gm_characters(state: tauri::State<'_, AppState>) -> Result<Vec<GmCharacter>, String> {
     let root = state.root.clone();
     crate::commands::join(move || characters(&root)).await
 }
@@ -1972,7 +2151,11 @@ pub struct GmMaterialRow {
 }
 
 /// Go bridge.go 的 materials 读侧：19 个仓库槽位逐个给出（没有也算 0），名字查物品库。
-pub fn materials(root: &Root, cat: &gmbuild::gmindex::Catalog, account: i64) -> Result<Vec<GmMaterialRow>, String> {
+pub fn materials(
+    root: &Root,
+    cat: &gmbuild::gmindex::Catalog,
+    account: i64,
+) -> Result<Vec<GmMaterialRow>, String> {
     if account <= 0 {
         return Err("请选择账号".into());
     }
@@ -2146,8 +2329,13 @@ pub fn manage(
     // 主线与追溯前置也要它（职业 `[job]` 段是主线资格判据之一），见 `gmquest`。
     let needs_grow = crate::gmstat::is_growth_action(&normalized.action)
         || normalized.action == "sp.recalculate"
-        || matches!(normalized.action.as_str(), "quests.mainline" | "quests.prerequisites");
-    let grow = needs_grow.then(|| crate::gmstat::Context::load(root)).transpose()?;
+        || matches!(
+            normalized.action.as_str(),
+            "quests.mainline" | "quests.prerequisites"
+        );
+    let grow = needs_grow
+        .then(|| crate::gmstat::Context::load(root))
+        .transpose()?;
     let quest_file = crate::gmquest::is_quest_action(&normalized.action)
         .then(|| crate::gmquest::load(root))
         .transpose()?;
@@ -2162,7 +2350,15 @@ pub fn manage(
     };
     let _lease = take_lease_best_effort(&db);
     let mut conn = open_rw(&db)?;
-    let result = manage_inner(&mut conn, &catalog, missing, &art, &g, &request, &normalized);
+    let result = manage_inner(
+        &mut conn,
+        &catalog,
+        missing,
+        &art,
+        &g,
+        &request,
+        &normalized,
+    );
     drop(busy);
     result
 }
@@ -2195,7 +2391,13 @@ pub(crate) fn manage_inner(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
 
-    let claim = claim_flow(&tx, g, request, "管理目标不是已知账号/角色", "流水号已用于不同操作");
+    let claim = claim_flow(
+        &tx,
+        g,
+        request,
+        "管理目标不是已知账号/角色",
+        "流水号已用于不同操作",
+    );
     let replay = match claim {
         Ok(Claim::Fresh) => None,
         Ok(Claim::Replay(stored)) => Some(stored),
@@ -2281,7 +2483,10 @@ fn run_manage_action(
     role: &crate::gmquest::Role,
     art: &ManageArtifacts<'_>,
 ) -> Result<(Value, String, String), String> {
-    if let Some(ctx) = art.grow.filter(|_| crate::gmstat::is_growth_action(&input.action)) {
+    if let Some(ctx) = art
+        .grow
+        .filter(|_| crate::gmstat::is_growth_action(&input.action))
+    {
         // 等级 / 转职 / 觉醒 / 转职分支：算式全在 `gmstat`，这一层只负责落库与审计。
         let (bytes, receipt) = crate::gmstat::apply(
             ctx,
@@ -2311,7 +2516,8 @@ fn run_manage_action(
     if input.action == "mail.send" {
         // 邮件发放：只往 `character_mail` 插一行，不碰角色存档（所以 `writes_character_state` 排除了它），
         // 也不写 `gm_mail`——那张表是旧管理台自己的队列，现役服务端一条 SQL 都不读它。
-        let (receipt, message) = crate::gmmail::send(tx, cat, missing_stack_limit, g.character_id, input)?;
+        let (receipt, message) =
+            crate::gmmail::send(tx, cat, missing_stack_limit, g.character_id, input)?;
         return Ok((receipt, message, String::new()));
     }
     if input.action == "materials.set" {
@@ -2373,7 +2579,8 @@ fn run_manage_action(
         ));
     }
     if matches!(input.action.as_str(), "sp" | "tp" | "equipment.unlock") {
-        let (updated, receipt) = crate::gmchar::apply_numeric_edit(&state, &input.action, input.amount)?;
+        let (updated, receipt) =
+            crate::gmchar::apply_numeric_edit(&state, &input.action, input.amount)?;
         tx.execute(SQL_STATE_WRITE, params![g.character_id, updated])
             .map_err(|e| format!("写回角色存档失败：{e}"))?;
         return Ok((
@@ -2397,7 +2604,8 @@ fn run_manage_action(
         durability_cap: art.durability_cap,
         amount: input.amount,
     };
-    let (updated, receipt) = crate::gmchar::apply_bag_edit(&state, cat, missing_stack_limit, &edit)?;
+    let (updated, receipt) =
+        crate::gmchar::apply_bag_edit(&state, cat, missing_stack_limit, &edit)?;
     tx.execute(SQL_STATE_WRITE, params![g.character_id, updated])
         .map_err(|e| format!("写回角色存档失败：{e}"))?;
     let message = if edit.durability {
@@ -2449,8 +2657,12 @@ mod tests {
         fn new(tag: &str) -> TmpDir {
             static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = SEQ.fetch_add(1, Ordering::SeqCst);
-            let p = std::env::temp_dir()
-                .join(format!("gmgrant-test-{}-{}-{}", tag, std::process::id(), n));
+            let p = std::env::temp_dir().join(format!(
+                "gmgrant-test-{}-{}-{}",
+                tag,
+                std::process::id(),
+                n
+            ));
             let _ = std::fs::remove_dir_all(&p);
             std::fs::create_dir_all(&p).expect("temp dir");
             TmpDir(p)
@@ -2496,11 +2708,15 @@ mod tests {
         let bad = format!(
             "{base}{SRC}\",\"slots\":{{\"a\":[65,120],\"b\":[120,176]}},\"missing_stack_limit\":1000}}"
         );
-        assert_eq!(BagRules::from_json(&bad).unwrap_err(), "overlapping bag ranges");
-        let bad2 = format!(
-            "{base}{SRC}\",\"slots\":{{\"a\":[0,10]}},\"missing_stack_limit\":1000}}"
+        assert_eq!(
+            BagRules::from_json(&bad).unwrap_err(),
+            "overlapping bag ranges"
         );
-        assert!(BagRules::from_json(&bad2).unwrap_err().starts_with("invalid bag slot range"));
+        let bad2 =
+            format!("{base}{SRC}\",\"slots\":{{\"a\":[0,10]}},\"missing_stack_limit\":1000}}");
+        assert!(BagRules::from_json(&bad2)
+            .unwrap_err()
+            .starts_with("invalid bag slot range"));
         let bad3 = r#"{"model":"other","source":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","slots":{},"missing_stack_limit":5}"#;
         assert_eq!(BagRules::from_json(bad3).unwrap_err(), "invalid bag policy");
     }
@@ -2555,13 +2771,25 @@ mod tests {
         assert_eq!(saved["level"], 70, "顶层键原样保留");
         assert_eq!(saved["creature_loyalty_updated_at"], 123);
         let inv = &saved["inventory"];
-        assert_eq!(inv["items"][0]["Template"], 3001, "物品行按 GM 的 Go 结构体写大写 Template/Amount（服务端反序列化大小写不敏感）");
+        assert_eq!(
+            inv["items"][0]["Template"], 3001,
+            "物品行按 GM 的 Go 结构体写大写 Template/Amount（服务端反序列化大小写不敏感）"
+        );
         assert_eq!(inv["items"][0]["Amount"], 5);
         assert_eq!(inv["coin"], 300);
-        assert_eq!(inv["unknown_top"], "keep-me", "inventory 未知键 flatten 保留");
+        assert_eq!(
+            inv["unknown_top"], "keep-me",
+            "inventory 未知键 flatten 保留"
+        );
         assert_eq!(inv["items"][0]["unknown_field"]["a"], 1);
-        assert!(inv["special_equipment"].get("1").is_some(), "专用容器键必须是十进制串");
-        assert!(inv.get("equipment").is_none(), "Go 的 omitempty：空装备栏不写");
+        assert!(
+            inv["special_equipment"].get("1").is_some(),
+            "专用容器键必须是十进制串"
+        );
+        assert!(
+            inv.get("equipment").is_none(),
+            "Go 的 omitempty：空装备栏不写"
+        );
         assert!(inv["items"].is_array(), "Go 无 omitempty：items 恒为数组");
     }
 
@@ -2587,7 +2815,10 @@ mod tests {
             r#"{{"version":"ordinary-bag-v1","gold":0,"items":[],"equipment":[
                  {{"slot":9,"template":123,"durability":1,"record":"{rec}"}}]}}"#
         ));
-        assert_eq!(read_bag(&s).unwrap_err(), "invalid equipment instance record");
+        assert_eq!(
+            read_bag(&s).unwrap_err(),
+            "invalid equipment instance record"
+        );
         // record 内嵌模板号不符
         let mut body = vec![0u8; RECORD_SIZE];
         body[2..6].copy_from_slice(&999u32.to_le_bytes());
@@ -2596,7 +2827,10 @@ mod tests {
             r#"{{"version":"ordinary-bag-v1","gold":0,"items":[],"equipment":[
                  {{"slot":9,"template":123,"durability":1,"record":"{rec}"}}]}}"#
         ));
-        assert_eq!(read_bag(&s).unwrap_err(), "equipment instance template mismatch");
+        assert_eq!(
+            read_bag(&s).unwrap_err(),
+            "equipment instance template mismatch"
+        );
         // 专用空间不是 1/7
         let s = state_with_inventory(
             r#"{"version":"ordinary-bag-v1","gold":0,"items":[],"special_equipment":{"2":[]}}"#,
@@ -2612,23 +2846,39 @@ mod tests {
         let mut b = Bag::default();
         assert_eq!(bag_add(&mut b, &r, None, 0, 0, 500).unwrap(), 0);
         assert_eq!(b.gold, 500);
-        assert!(bag_add(&mut b, &r, None, 0, 0, u32::MAX).is_err(), "金币溢出必须整笔拒");
+        assert!(
+            bag_add(&mut b, &r, None, 0, 0, u32::MAX).is_err(),
+            "金币溢出必须整笔拒"
+        );
         assert_eq!(bag_add(&mut b, &r, None, 0, 1, 7).unwrap(), 1);
         assert_eq!(b.coin, 7);
 
         // 落格：[throw] → 65..120
-        assert_eq!(bag_add(&mut b, &r, Some("[throw]"), 0, 2001, 3).unwrap(), 65);
-        assert_eq!(bag_add(&mut b, &r, Some("[throw]"), 0, 2001, 4).unwrap(), 65, "先叠已有行");
+        assert_eq!(
+            bag_add(&mut b, &r, Some("[throw]"), 0, 2001, 3).unwrap(),
+            65
+        );
+        assert_eq!(
+            bag_add(&mut b, &r, Some("[throw]"), 0, 2001, 4).unwrap(),
+            65,
+            "先叠已有行"
+        );
         assert_eq!(b.items[0].amount, 7);
         // material 类型名兜底 → 121..176
-        assert_eq!(bag_add(&mut b, &r, Some("Material"), 0, 2002, 1).unwrap(), 121);
+        assert_eq!(
+            bag_add(&mut b, &r, Some("Material"), 0, 2002, 1).unwrap(),
+            121
+        );
         // 超过堆叠上限直接拒
         assert_eq!(
             bag_add(&mut b, &r, Some("[throw]"), 5, 2003, 6).unwrap_err(),
             "award exceeds stack limit"
         );
         // 数量为一
-        assert_eq!(bag_add(&mut b, &r, Some("[throw]"), 0, 2003, 0).unwrap_err(), "invalid inventory award");
+        assert_eq!(
+            bag_add(&mut b, &r, Some("[throw]"), 0, 2003, 0).unwrap_err(),
+            "invalid inventory award"
+        );
     }
 
     #[test]
@@ -2654,15 +2904,18 @@ mod tests {
     fn add_equipment_and_special() {
         let r = rules();
         let mut b = Bag::default();
-        assert_eq!(add_equipment(&mut b, &r, 12345, 2, 40).unwrap(), vec![9, 10]);
+        assert_eq!(
+            add_equipment(&mut b, &r, 12345, 2, 40, EquipCraft::default()).unwrap(),
+            vec![9, 10]
+        );
         assert_eq!(b.equipment[0].durability, 40);
         assert_eq!(
-            add_equipment(&mut b, &r, 12345, 60, 1).unwrap_err(),
+            add_equipment(&mut b, &r, 12345, 60, 1, EquipCraft::default()).unwrap_err(),
             "invalid equipment award",
             "count 超过窗口（9..=64 共 56 格）先撞数量守卫，与 Go 一致"
         );
         assert_eq!(
-            add_equipment(&mut b, &r, 12345, 56, 1).unwrap_err(),
+            add_equipment(&mut b, &r, 12345, 56, 1, EquipCraft::default()).unwrap_err(),
             "equipment bag is full",
             "count 恰好等于窗口，但 9/10 已被占 ⇒ 放不下"
         );
@@ -2682,9 +2935,7 @@ mod tests {
     // ---- 装备目录 ----
 
     fn equip_file(rows: &str) -> String {
-        format!(
-            r#"{{"source":{{"checksum":"{SRC}"}},"rows":{rows}}}"#
-        )
+        format!(r#"{{"source":{{"checksum":"{SRC}"}},"rows":{rows}}}"#)
     }
 
     #[test]
@@ -2729,7 +2980,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cat.reward(1).unwrap(), 0, "免耐久部位缺耐久 → 耐久 0 放行");
-        assert_eq!(cat.reward(2).unwrap_err(), "missing source equipment durability");
+        assert_eq!(
+            cat.reward(2).unwrap_err(),
+            "missing source equipment durability"
+        );
         assert_eq!(cat.reward(3).unwrap_err(), "invalid equipment durability");
         assert!(cat.reward(4).unwrap_err().contains("不在装备目录"));
     }
@@ -2762,17 +3016,25 @@ mod tests {
         assert_eq!(m.counts.get(&363), Some(&2));
         let saved = m.save().unwrap();
         let text = String::from_utf8(saved).unwrap();
-        assert!(text.contains("\"363\":2"), "槽位键必须是十进制字符串: {text}");
+        assert!(
+            text.contains("\"363\":2"),
+            "槽位键必须是十进制字符串: {text}"
+        );
         assert!(!text.contains("381"));
 
         assert!(AccountMaterials::from_raw(Some(br#"{"version":"v2"}"#)).is_err());
         assert!(
-            AccountMaterials::from_raw(Some(br#"{"version":"account-materials-v1","counts":{"777":1}}"#))
-                .unwrap_err()
+            AccountMaterials::from_raw(Some(
+                br#"{"version":"account-materials-v1","counts":{"777":1}}"#
+            ))
+            .unwrap_err()
                 == "invalid account material slot"
         );
         let empty = AccountMaterials::from_raw(Some(b"null")).unwrap();
-        assert_eq!(empty.save().unwrap(), br#"{"version":"account-materials-v1"}"#.to_vec());
+        assert_eq!(
+            empty.save().unwrap(),
+            br#"{"version":"account-materials-v1"}"#.to_vec()
+        );
     }
 
     // ---- 事务本体（内存库跑真实 schema） ----
@@ -2851,7 +3113,14 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         conn
     }
 
-    fn req(id: &str, account: i64, character: i64, gold: u32, cera: i64, items: Vec<(u32, u32)>) -> GrantRequest {
+    fn req(
+        id: &str,
+        account: i64,
+        character: i64,
+        gold: u32,
+        cera: i64,
+        items: Vec<(u32, u32)>,
+    ) -> GrantRequest {
         GrantRequest {
             id: id.into(),
             account_id: account,
@@ -2861,7 +3130,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             gold,
             items: items
                 .into_iter()
-                .map(|(template, amount)| GrantItem { template, amount })
+                .map(|(template, amount)| GrantItem {
+                    template,
+                    amount,
+                    ..Default::default()
+                })
                 .collect(),
             reason: DEFAULT_REASON.into(),
             operator: OPERATOR.into(),
@@ -2869,7 +3142,12 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
     }
 
     fn fake_classify(table: HashMap<u32, GrantPlan>) -> impl Fn(u32) -> Result<GrantPlan, String> {
-        move |t| table.get(&t).cloned().ok_or_else(|| format!("物品 {t} 不在物品库里"))
+        move |t| {
+            table
+                .get(&t)
+                .cloned()
+                .ok_or_else(|| format!("物品 {t} 不在物品库里"))
+        }
     }
 
     fn char_state(conn: &rusqlite::Connection) -> Value {
@@ -2883,9 +3161,18 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let mut t = HashMap::new();
         t.insert(
             2001,
-            GrantPlan::Stackable { type_text: Some("[throw]".into()), stack_limit: 0 },
+            GrantPlan::Stackable {
+                type_text: Some("[throw]".into()),
+                stack_limit: 0,
+            },
         );
-        t.insert(3033, GrantPlan::Stackable { type_text: Some("[material]".into()), stack_limit: 0 });
+        t.insert(
+            3033,
+            GrantPlan::Stackable {
+                type_text: Some("[material]".into()),
+                stack_limit: 0,
+            },
+        );
         t
     }
 
@@ -2903,16 +3190,27 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(first.receipt["gold_added"], 100);
         // 回执落库必须是合法 JSON 且字段名与 Go 对齐（grant 恒在首位）。
         let stored: Vec<u8> = conn
-            .query_row("SELECT receipt FROM admin_grants WHERE grant_id=?1", params![g.id], |row| row.get(0))
+            .query_row(
+                "SELECT receipt FROM admin_grants WHERE grant_id=?1",
+                params![g.id],
+                |row| row.get(0),
+            )
             .unwrap();
         let text = String::from_utf8(stored).unwrap();
-        assert!(text.starts_with(r#"{"grant":"launcher-0001-0002""#), "{text}");
+        assert!(
+            text.starts_with(r#"{"grant":"launcher-0001-0002""#),
+            "{text}"
+        );
 
         // 同流水号同请求 ⇒ 回放，不二次支付。
         let replay = grant_inner(&mut conn, &dir.0, &r, &g, &request, &cl, None).unwrap();
         assert!(!replay.applied);
         assert_eq!(replay.message, "该笔发放已存在，未重复发放。");
-        assert_eq!(char_state(&conn)["inventory"]["gold"], 100, "回放不得再叠金币");
+        assert_eq!(
+            char_state(&conn)["inventory"]["gold"],
+            100,
+            "回放不得再叠金币"
+        );
 
         // 同流水号不同请求 ⇒ 拒绝。
         let g2 = req("launcher-0001-0002", 1, 10, 999, 0, vec![]);
@@ -2928,7 +3226,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let dir = TmpDir::new("write");
         let r = rules();
         let mut conn = test_conn();
-        conn.execute("INSERT INTO account_currency(account_id,cera) VALUES(1,50)", []).unwrap();
+        conn.execute(
+            "INSERT INTO account_currency(account_id,cera) VALUES(1,50)",
+            [],
+        )
+        .unwrap();
         let g = req(
             "launcher-0002-0007",
             1,
@@ -2948,10 +3250,17 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         let state = char_state(&conn);
         assert_eq!(state["inventory"]["gold"], 200);
-        assert_eq!(state["inventory"]["items"][0]["Template"], 2001, "GM 写的行是大写形状");
+        assert_eq!(
+            state["inventory"]["items"][0]["Template"], 2001,
+            "GM 写的行是大写形状"
+        );
         assert_eq!(state["inventory"]["items"][0]["Amount"], 3);
         let counts: Vec<u8> = conn
-            .query_row("SELECT counts FROM account_material_storage WHERE account_id=1", [], |r| r.get(0))
+            .query_row(
+                "SELECT counts FROM account_material_storage WHERE account_id=1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         let counts: Value = serde_json::from_slice(&counts).unwrap();
         assert_eq!(counts["counts"]["363"], 11);
@@ -2963,7 +3272,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let dir = TmpDir::new("cera");
         let r = rules();
         let mut conn = test_conn();
-        conn.execute("INSERT INTO account_currency(account_id,cera) VALUES(1,10)", []).unwrap();
+        conn.execute(
+            "INSERT INTO account_currency(account_id,cera) VALUES(1,10)",
+            [],
+        )
+        .unwrap();
         let g = req("launcher-0003-0001", 1, 0, 0, -100, vec![]);
         let request = serde_json::to_vec(&g).unwrap();
         let cl = fake_classify(grant_table());
@@ -2975,7 +3288,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             .unwrap();
         assert_eq!(n, 0, "失败必须连领取记录一起回滚");
         let cera: i64 = conn
-            .query_row("SELECT cera FROM account_currency WHERE account_id=1", [], |r| r.get(0))
+            .query_row(
+                "SELECT cera FROM account_currency WHERE account_id=1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(cera, 10);
 
@@ -2995,13 +3312,24 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let r = rules();
         let mut conn = test_conn();
         // 第一件能落，第二件（不在任何表里）必须让整笔回滚。
-        let g = req("launcher-0004-0001", 1, 10, 500, 0, vec![(2001, 1), (9999, 1)]);
+        let g = req(
+            "launcher-0004-0001",
+            1,
+            10,
+            500,
+            0,
+            vec![(2001, 1), (9999, 1)],
+        );
         let request = serde_json::to_vec(&g).unwrap();
         let cl = fake_classify(grant_table());
         assert!(grant_inner(&mut conn, &dir.0, &r, &g, &request, &cl, None)
             .unwrap_err()
             .contains("不在物品库里"));
-        assert_eq!(char_state(&conn)["inventory"]["gold"], 0, "金币不得残留半笔");
+        assert_eq!(
+            char_state(&conn)["inventory"]["gold"],
+            0,
+            "金币不得残留半笔"
+        );
         let n: i64 = conn
             .query_row("SELECT count(*) FROM admin_grants", [], |r| r.get(0))
             .unwrap();
@@ -3068,13 +3396,17 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         );
         let mut table = grant_table();
         table.insert(77001, GrantPlan::Equipment);
-        table.insert(
-            77002,
-            GrantPlan::Special(1),
-        );
+        table.insert(77002, GrantPlan::Special(1));
         let r = rules();
         let mut conn = test_conn();
-        let g = req("launcher-0006-0001", 1, 10, 0, 0, vec![(77001, 1), (77002, 2)]);
+        let g = req(
+            "launcher-0006-0001",
+            1,
+            10,
+            0,
+            0,
+            vec![(77001, 1), (77002, 2)],
+        );
         let request = serde_json::to_vec(&g).unwrap();
         let cl = fake_classify(table);
         let out = grant_inner(&mut conn, &dir.0, &r, &g, &request, &cl, None).unwrap();
@@ -3083,7 +3415,189 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let inv = &state["inventory"];
         assert_eq!(inv["equipment"][0]["template"], 77001);
         assert_eq!(inv["equipment"][0]["durability"], 42);
-        assert_eq!(inv["special_equipment"]["1"].as_array().unwrap().len(), 2, "时装进专用容器");
+        assert_eq!(
+            inv["special_equipment"]["1"].as_array().unwrap().len(),
+            2,
+            "时装进专用容器"
+        );
+    }
+
+    /// 武器装备目录 + 普通装备分类夹具（耐久 42）。
+    fn craft_fixture(dir: &TmpDir) -> HashMap<u32, GrantPlan> {
+        dir.write(
+            "equipment.current37.json",
+            &equip_file(
+                r#"[{"ID":77001,"Path":"a.equ","SHA256":"x","Fields":{
+                      "[rarity]":[{"type":0,"value":1,"text":""}],
+                      "[equipment type]":[{"type":6,"value":0,"text":"[weapon]"}],
+                      "[durability]":[{"type":0,"value":42,"text":""}]}},
+                    {"ID":77002,"Path":"b.equ","SHA256":"x","Fields":{
+                      "[rarity]":[{"type":0,"value":1,"text":""}],
+                      "[equipment type]":[{"type":6,"value":0,"text":"[ring]"}],
+                      "[durability]":[{"type":0,"value":30,"text":""}]}},
+                    {"ID":77003,"Path":"c.equ","SHA256":"x","Fields":{
+                      "[rarity]":[{"type":0,"value":1,"text":""}],
+                      "[equipment type]":[{"type":6,"value":0,"text":"[jacket]"}],
+                      "[durability]":[{"type":0,"value":30,"text":""}]}}]"#,
+            ),
+        );
+        let mut table = grant_table();
+        table.insert(77001, GrantPlan::Equipment);
+        table.insert(77002, GrantPlan::Equipment);
+        table.insert(77003, GrantPlan::Equipment);
+        table
+    }
+
+    #[test]
+    fn grant_equipment_craft_writes_record_and_refine() {
+        let dir = TmpDir::new("craft");
+        let table = craft_fixture(&dir);
+        let r = rules();
+        let mut conn = test_conn();
+        let mut g = req("launcher-0006-0002", 1, 10, 0, 0, vec![(77001, 2)]);
+        g.items[0].upgrade = 12;
+        g.items[0].amplify = 3;
+        g.items[0].amplify_value = 9;
+        g.items[0].refine = 8;
+        g.items[0].durability = 77;
+        let request = serde_json::to_vec(&g).unwrap();
+        let out = grant_inner(
+            &mut conn,
+            &dir.0,
+            &r,
+            &g,
+            &request,
+            &fake_classify(table),
+            None,
+        )
+        .unwrap();
+        assert!(out.applied);
+        let inv = &char_state(&conn)["inventory"];
+        assert_eq!(inv["equipment"].as_array().unwrap().len(), 2);
+        for row in inv["equipment"].as_array().unwrap() {
+            assert_eq!(row["durability"], 77, "耐久覆盖压过目录定义");
+            assert_eq!(row["refine"], 8, "锻造落在服务端权威字段");
+            let raw = row["record"].as_str().expect("打造过的装备必须带实例行");
+            let rec = b64_decoded(raw).unwrap();
+            assert_eq!(rec.len(), RECORD_SIZE);
+            assert_eq!(rec[10] & 0x1f, 12, "强化/增幅共用等级字节");
+            assert_eq!(rec[19], 3, "红字属性类型（力量）");
+            assert_eq!(rec[20], 9, "红字数值");
+            assert_eq!(rec[76], 8, "锻造行内镜像");
+            assert_eq!(
+                &rec[2..6],
+                &77001u32.to_le_bytes(),
+                "实例行 template 与行一致"
+            );
+        }
+        // 裸耐久覆盖（不带打造参数）不物化 record，保持旧形状。
+        let dir2 = TmpDir::new("craft-dur");
+        let table2 = craft_fixture(&dir2);
+        let mut conn2 = test_conn();
+        let mut g2 = req("launcher-0006-0003", 1, 10, 0, 0, vec![(77001, 1)]);
+        g2.items[0].durability = 50;
+        let request2 = serde_json::to_vec(&g2).unwrap();
+        grant_inner(
+            &mut conn2,
+            &dir2.0,
+            &r,
+            &g2,
+            &request2,
+            &fake_classify(table2),
+            None,
+        )
+        .unwrap();
+        let row = &char_state(&conn2)["inventory"]["equipment"][0];
+        assert_eq!(row["durability"], 50);
+        assert!(row.get("record").is_none(), "纯耐久覆盖不该物化实例行");
+        assert!(row.get("refine").is_none());
+    }
+
+    #[test]
+    fn grant_equipment_craft_kinds_are_gated() {
+        let dir = TmpDir::new("craft-gate");
+        let table = craft_fixture(&dir);
+        let r = rules();
+        let mut conn = test_conn();
+        // 白名单内的非武器不能锻造（77002 是 [ring]）。
+        let mut g = req("launcher-0006-0004", 1, 10, 0, 0, vec![(77002, 1)]);
+        g.items[0].refine = 3;
+        let request = serde_json::to_vec(&g).unwrap();
+        assert!(grant_inner(
+            &mut conn,
+            &dir.0,
+            &r,
+            &g,
+            &request,
+            &fake_classify(table.clone()),
+            None
+        )
+        .unwrap_err()
+        .contains("不支持锻造"));
+        // 白名单外的类型不能强化/增幅（77003 是 [jacket]，护甲类不在清单里）。
+        let mut g2 = req("launcher-0006-0005", 1, 10, 0, 0, vec![(77003, 1)]);
+        g2.items[0].upgrade = 5;
+        let request2 = serde_json::to_vec(&g2).unwrap();
+        assert!(grant_inner(
+            &mut conn,
+            &dir.0,
+            &r,
+            &g2,
+            &request2,
+            &fake_classify(table.clone()),
+            None
+        )
+        .unwrap_err()
+        .contains("不支持强化/增幅"));
+        // 带打造参数的普通装备照常落库。
+        let mut g3 = req("launcher-0006-0006", 1, 10, 0, 0, vec![(77001, 1)]);
+        g3.items[0].upgrade = 7;
+        let request3 = serde_json::to_vec(&g3).unwrap();
+        grant_inner(
+            &mut conn,
+            &dir.0,
+            &r,
+            &g3,
+            &request3,
+            &fake_classify(table),
+            None,
+        )
+        .unwrap();
+        let rec = b64_decoded(
+            char_state(&conn)["inventory"]["equipment"][0]["record"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(rec[10] & 0x1f, 7);
+        assert_eq!(rec[19], 0, "没选增幅属性就没有红字");
+    }
+
+    #[test]
+    fn grant_rejects_out_of_range_craft_args() {
+        let input = |upgrade: u8, amplify: u8, refine: u8| {
+            let dir = TmpDir::new("craft-range");
+            let table = craft_fixture(&dir);
+            let r = rules();
+            let mut conn = test_conn();
+            let mut g = req("launcher-0006-0007", 1, 10, 0, 0, vec![(77001, 1)]);
+            g.items[0].upgrade = upgrade;
+            g.items[0].amplify = amplify;
+            g.items[0].refine = refine;
+            let request = serde_json::to_vec(&g).unwrap();
+            grant_inner(
+                &mut conn,
+                &dir.0,
+                &r,
+                &g,
+                &request,
+                &fake_classify(table),
+                None,
+            )
+        };
+        assert!(input(32, 0, 0).unwrap_err().contains("强化等级范围"));
+        assert!(input(0, 5, 0).unwrap_err().contains("增幅属性取值"));
+        assert!(input(0, 0, 9).unwrap_err().contains("锻造等级上限"));
     }
 
     // ---- 管理操作：背包编辑与账号晶体仓库 ----
@@ -3151,7 +3665,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..Default::default()
         };
         let (n, g, request) = manage_req(&input);
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(out.applied);
         assert_eq!(out.message, "物品数量已保存，原期限与属性已保留");
         let state = char_state(&conn);
@@ -3160,7 +3683,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(state["inventory"]["gold"], 100);
         assert_eq!(state["inventory"]["worn"][0]["refine"], 8);
         let kind: String = conn
-            .query_row("SELECT typeof(state) FROM characters WHERE id=10", [], |r| r.get(0))
+            .query_row(
+                "SELECT typeof(state) FROM characters WHERE id=10",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(kind, "blob", "回写必须是 BLOB，与服务端写的那些同形");
 
@@ -3172,13 +3699,25 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert!(reason.contains(r#""action":"inventory.amount""#), "{reason}");
+        assert!(
+            reason.contains(r#""action":"inventory.amount""#),
+            "{reason}"
+        );
         let receipt: Value = serde_json::from_slice(&receipt).unwrap();
         assert_eq!(receipt["before"]["Amount"], 3);
         assert_eq!(receipt["after"]["Amount"], 7);
 
         // 同流水号同请求 ⇒ 回放原回执，不再动存档。
-        let again = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let again = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(!again.applied);
         assert_eq!(again.message, "该笔操作已存在，未重复执行。");
         assert_eq!(again.receipt["after"]["Amount"], 7);
@@ -3188,7 +3727,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         other.amount = 9;
         let (n2, g2, request2) = manage_req(&other);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g2, &request2, &n2).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g2,
+                &request2,
+                &n2
+            )
+            .unwrap_err(),
             "流水号已用于不同操作"
         );
 
@@ -3199,7 +3747,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         stale.revision = "f".repeat(64);
         let (n3, g3, request3) = manage_req(&stale);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g3, &request3, &n3).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g3,
+                &request3,
+                &n3
+            )
+            .unwrap_err(),
             "物品或数量已变化，请刷新背包后重新操作"
         );
         assert_eq!(char_state(&conn)["inventory"]["items"][0]["Amount"], 7);
@@ -3230,7 +3787,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..Default::default()
         };
         let (n, g, request) = manage_req(&input);
-        let art = ManageArtifacts { durability_cap: Some(120), ..Default::default() };
+        let art = ManageArtifacts {
+            durability_cap: Some(120),
+            ..Default::default()
+        };
 
         // 先撞两道拒绝门（此时存档还是 48，两把钥匙都对得上，报的就是要验的那一条）。
         // 上限来自装备目录：目录里查不到（产物缺 / 这件不是装备）就整笔拒，存档不动。
@@ -3239,7 +3799,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         no_cap.amount = 200;
         let (n2, g2, request2) = manage_req(&no_cap);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g2, &request2, &n2).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g2,
+                &request2,
+                &n2
+            )
+            .unwrap_err(),
             "装备目录里查不到这件装备的耐久上限"
         );
         assert_eq!(char_state(&conn)["inventory"]["worn"][0]["durability"], 48);
@@ -3262,9 +3831,15 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         let state = char_state(&conn);
         assert_eq!(state["inventory"]["worn"][0]["durability"], 120);
-        assert_eq!(state["inventory"]["worn"][0]["refine"], 8, "精炼记录必须跟着留下");
+        assert_eq!(
+            state["inventory"]["worn"][0]["refine"], 8,
+            "精炼记录必须跟着留下"
+        );
         assert_eq!(state["inventory"]["worn"][0]["slot"], 12);
-        assert_eq!(state["inventory"]["items"][0]["Amount"], 3, "别的行一个字都不动");
+        assert_eq!(
+            state["inventory"]["items"][0]["Amount"], 3,
+            "别的行一个字都不动"
+        );
         assert_eq!(state["inventory"]["items"][0]["expire_time"], 2147483647);
 
         let receipt: Value = conn
@@ -3303,16 +3878,32 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..Default::default()
         };
         let (n, g, request) = manage_req(&input);
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(out.applied);
         assert_eq!(out.message, "物品已删除，删除前记录已保存到操作审计");
         assert_eq!(out.receipt["after"], Value::Null);
-        assert_eq!(out.receipt["before"]["refine"], 8, "删除前的记录要留在审计里");
+        assert_eq!(
+            out.receipt["before"]["refine"], 8,
+            "删除前的记录要留在审计里"
+        );
 
         let state = char_state(&conn);
         assert_eq!(state["inventory"]["worn"].as_array().unwrap().len(), 1);
         assert_eq!(state["inventory"]["worn"][0]["template"], 101040830);
-        assert_eq!(state["inventory"]["items"].as_array().unwrap().len(), 1, "只删那一行");
+        assert_eq!(
+            state["inventory"]["items"].as_array().unwrap().len(),
+            1,
+            "只删那一行"
+        );
         assert_eq!(state["inventory"]["gold"], 100);
     }
 
@@ -3334,11 +3925,24 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         };
 
         let (n, g, request) = manage_req(&numeric("sp", 5, "launcher-0011-0001"));
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(out.applied);
         assert_eq!(out.message, "角色修改已保存，重新选择角色后生效");
         assert_eq!(out.receipt["before"], serde_json::json!([10, 4]));
-        assert_eq!(out.receipt["after"], serde_json::json!([15, 9]), "两格各加同一份点数（与服务端升级时同口径）");
+        assert_eq!(
+            out.receipt["after"],
+            serde_json::json!([15, 9]),
+            "两格各加同一份点数（与服务端升级时同口径）"
+        );
         let state = char_state(&conn);
         assert_eq!(state["level"], 5);
         assert_eq!(state["technique_points"], serde_json::json!([2, 2]));
@@ -3348,22 +3952,52 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         // 装备栏：只允许那三位，已有的位保留。
         let (n, g, request) = manage_req(&numeric("equipment.unlock", 0x12, "launcher-0011-0002"));
-        manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert_eq!(char_state(&conn)["equipment_slot_flags"], 0x13);
 
         // 越界掩码与超上限的点数都在写之前拒，存档一个字节都不动。
         let (n, g, request) = manage_req(&numeric("equipment.unlock", 0x20, "launcher-0011-0003"));
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "只能开启辅助装备、魔法石和耳环栏"
         );
         let (n, g, request) = manage_req(&numeric("tp", 65534, "launcher-0011-0004"));
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "技巧点超过存档上限"
         );
         assert_eq!(char_state(&conn)["equipment_slot_flags"], 0x13);
-        assert_eq!(char_state(&conn)["technique_points"], serde_json::json!([2, 2]));
+        assert_eq!(
+            char_state(&conn)["technique_points"],
+            serde_json::json!([2, 2])
+        );
         let live: i64 = conn
             .query_row(
                 "SELECT count(*) FROM admin_grants WHERE grant_id IN (?1,?2)",
@@ -3381,10 +4015,22 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         // 同流水号同请求 ⇒ 回放，不会再叠一层点数。
         let (n, g, request) = manage_req(&numeric("sp", 5, "launcher-0011-0001"));
-        let again = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let again = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(!again.applied);
         assert_eq!(again.message, "该笔操作已存在，未重复执行。");
-        assert_eq!(char_state(&conn)["skill_points"], serde_json::json!([15, 9]));
+        assert_eq!(
+            char_state(&conn)["skill_points"],
+            serde_json::json!([15, 9])
+        );
     }
 
     #[test]
@@ -3425,7 +4071,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(out.receipt["level"], 5);
         let state = char_state(&conn);
         assert_eq!(state["skill_points"], serde_json::json!([18, 18]));
-        assert_eq!(state["level"], 5, "等级与经验一个字都不动（这一档只写技能点）");
+        assert_eq!(
+            state["level"], 5,
+            "等级与经验一个字都不动（这一档只写技能点）"
+        );
         assert_eq!(state["experience"], 1500);
         assert_eq!(state["technique_points"], serde_json::json!([2, 2]));
         assert_eq!(state["attributes"]["物理攻击力"], 12.5);
@@ -3440,10 +4089,22 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..Default::default()
         });
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "养成产物未就绪：gm-growth.json"
         );
-        assert_eq!(char_state(&conn)["skill_points"], serde_json::json!([18, 18]));
+        assert_eq!(
+            char_state(&conn)["skill_points"],
+            serde_json::json!([18, 18])
+        );
         let rows: i64 = conn
             .query_row(
                 "SELECT count(*) FROM admin_grants WHERE grant_id=?1",
@@ -3482,7 +4143,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..Default::default()
         };
         let (n, g, request) = manage_req(&base);
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(out.applied);
         assert_eq!(
             out.message,
@@ -3508,11 +4178,24 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         };
         let (n2, g2, request2) = manage_req(&stale);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g2, &request2, &n2).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g2,
+                &request2,
+                &n2
+            )
+            .unwrap_err(),
             "材料数量已从 1 变为 50，请刷新后再修改"
         );
         let live: i64 = conn
-            .query_row("SELECT count(*) FROM admin_grants WHERE grant_id=?1", params![g2.id], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM admin_grants WHERE grant_id=?1",
+                params![g2.id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(live, 0);
 
@@ -3524,7 +4207,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         };
         let (n3, g3, request3) = manage_req(&wrong);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g3, &request3, &n3).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g3,
+                &request3,
+                &n3
+            )
+            .unwrap_err(),
             "该物品不属于账号晶体仓库"
         );
 
@@ -3536,7 +4228,19 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..base.clone()
         };
         let (n4, g4, request4) = manage_req(&zero);
-        assert!(manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g4, &request4, &n4).unwrap().applied);
+        assert!(
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g4,
+                &request4,
+                &n4
+            )
+            .unwrap()
+            .applied
+        );
         let counts: Vec<u8> = conn
             .query_row(
                 "SELECT counts FROM account_material_storage WHERE account_id=1",
@@ -3544,7 +4248,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(String::from_utf8(counts).unwrap(), r#"{"version":"account-materials-v1"}"#);
+        assert_eq!(
+            String::from_utf8(counts).unwrap(),
+            r#"{"version":"account-materials-v1"}"#
+        );
     }
 
     #[test]
@@ -3565,7 +4272,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         let mut bad = ok.clone();
         bad.id = "grant-0001".into();
-        assert_eq!(normalize_manage(&bad).unwrap_err(), "管理操作缺少有效的流水号");
+        assert_eq!(
+            normalize_manage(&bad).unwrap_err(),
+            "管理操作缺少有效的流水号"
+        );
 
         bad = ok.clone();
         bad.character = 0;
@@ -3578,7 +4288,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         // 任务五个动作也进白名单了；带不上任务 id 才拒（Go 的 1..100 那一条）。
         bad = ok.clone();
         bad.action = "quests.complete".into();
-        assert_eq!(normalize_manage(&bad).unwrap_err(), "单次请选择 1 至 100 个任务");
+        assert_eq!(
+            normalize_manage(&bad).unwrap_err(),
+            "单次请选择 1 至 100 个任务"
+        );
 
         bad = ok.clone();
         bad.revision = String::new();
@@ -3614,22 +4327,42 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert!(normalize_manage(&grow).is_ok());
         let mut zero = grow.clone();
         zero.amount = 0;
-        assert_eq!(normalize_manage(&zero).unwrap_err(), "要写入的数值必须大于 0");
+        assert_eq!(
+            normalize_manage(&zero).unwrap_err(),
+            "要写入的数值必须大于 0"
+        );
 
         // 只有 profession 需要阶段；缺阶段或阶段越界都拒在领取之前（Go 的请求门）。
-        let branch = ManageInput { action: "profession".into(), amount: 1, ..grow.clone() };
-        assert_eq!(normalize_manage(&branch).unwrap_err(), "请选择有效的转职分支和觉醒阶段");
+        let branch = ManageInput {
+            action: "profession".into(),
+            amount: 1,
+            ..grow.clone()
+        };
+        assert_eq!(
+            normalize_manage(&branch).unwrap_err(),
+            "请选择有效的转职分支和觉醒阶段"
+        );
         let mut bad_stage = branch.clone();
         bad_stage.stage = Some(4);
-        assert_eq!(normalize_manage(&bad_stage).unwrap_err(), "请选择有效的转职分支和觉醒阶段");
+        assert_eq!(
+            normalize_manage(&bad_stage).unwrap_err(),
+            "请选择有效的转职分支和觉醒阶段"
+        );
         bad_stage.stage = Some(2);
         bad_stage.amount = 16;
-        assert_eq!(normalize_manage(&bad_stage).unwrap_err(), "请选择有效的转职分支和觉醒阶段");
+        assert_eq!(
+            normalize_manage(&bad_stage).unwrap_err(),
+            "请选择有效的转职分支和觉醒阶段"
+        );
         bad_stage.amount = 2;
         assert!(normalize_manage(&bad_stage).is_ok());
 
         // 觉醒/转职分支那两条不吃背包三件套。
-        let awaken = ManageInput { action: "awakening".into(), amount: 1, ..grow.clone() };
+        let awaken = ManageInput {
+            action: "awakening".into(),
+            amount: 1,
+            ..grow.clone()
+        };
         assert!(normalize_manage(&awaken).is_ok());
 
         // 耐久那一档：三件套 + 「当前耐久」缺一不可。数量不是它看的字段，所以不吃 expected_amount。
@@ -3701,7 +4434,19 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..Default::default()
         };
         let (n, g, request) = manage_req(&input);
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts { grow: Some(&ctx), ..Default::default() }, &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts {
+                grow: Some(&ctx),
+                ..Default::default()
+            },
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(out.applied);
         assert_eq!(out.message, "角色修改已保存，重新选择角色后生效");
         let state = char_state(&conn);
@@ -3709,25 +4454,51 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(state["experience"], 250);
         assert_eq!(state["skill_points"][0], 7, "跨 2、3 两级各授 3/4 点");
         assert_eq!(state["attributes"]["[hp max]"], 125);
-        assert_eq!(state["inventory"]["gold"], 5, "这一笔只落改动的键，背包容器原封不动");
+        assert_eq!(
+            state["inventory"]["gold"], 5,
+            "这一笔只落改动的键，背包容器原封不动"
+        );
         let kind: String = conn
-            .query_row("SELECT typeof(state) FROM characters WHERE id=10", [], |r| r.get(0))
+            .query_row(
+                "SELECT typeof(state) FROM characters WHERE id=10",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(kind, "blob", "回写必须是 BLOB，与服务端写的那些同形");
 
         // 审计回执：整份改前改后，字段名与 Go editCharacter 的 details 对齐。
         let raw: Vec<u8> = conn
-            .query_row("SELECT receipt FROM admin_grants WHERE grant_id=?1", params![g.id], |r| r.get(0))
+            .query_row(
+                "SELECT receipt FROM admin_grants WHERE grant_id=?1",
+                params![g.id],
+                |r| r.get(0),
+            )
             .unwrap();
         let receipt: Value = serde_json::from_slice(&raw).unwrap();
         assert_eq!(receipt["action"], "level");
         assert_eq!(receipt["value"], 3);
-        assert!(receipt["stage"].is_null(), "不带阶段的那三档 stage 落 null，与 Go 的 *byte 同形");
+        assert!(
+            receipt["stage"].is_null(),
+            "不带阶段的那三档 stage 落 null，与 Go 的 *byte 同形"
+        );
         assert_eq!(receipt["before"]["level"], 1);
         assert_eq!(receipt["after"]["level"], 3);
 
         // 同流水号重放 ⇒ 领号即回，等级不会涨两次。
-        let again = manage_inner(&mut conn, &cat, 0, &ManageArtifacts { grow: Some(&ctx), ..Default::default() }, &g, &request, &n).unwrap();
+        let again = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts {
+                grow: Some(&ctx),
+                ..Default::default()
+            },
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(!again.applied);
         assert_eq!(again.message, "该笔操作已存在，未重复执行。");
         assert_eq!(char_state(&conn)["level"], 3);
@@ -3737,7 +4508,19 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         repeat.id = "launcher-0011-0002".into();
         let (n2, g2, request2) = manage_req(&repeat);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts { grow: Some(&ctx), ..Default::default() }, &g2, &request2, &n2).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts {
+                    grow: Some(&ctx),
+                    ..Default::default()
+                },
+                &g2,
+                &request2,
+                &n2
+            )
+            .unwrap_err(),
             "目标等级必须高于当前等级且不超过服务器上限"
         );
         assert_eq!(char_state(&conn)["level"], 3);
@@ -3761,7 +4544,19 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..Default::default()
         };
         let (n, g, request) = manage_req(&input);
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts { grow: Some(&ctx), ..Default::default() }, &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts {
+                grow: Some(&ctx),
+                ..Default::default()
+            },
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(out.applied);
         let state = char_state(&conn);
         assert_eq!(state["advancement"], 1);
@@ -3769,11 +4564,19 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         // 阶段一路留在链路里：审计的 reason 是整份请求，receipt 是这份带阶段的回执。
         let reason: String = conn
-            .query_row("SELECT reason FROM admin_grants WHERE grant_id=?1", params![g.id], |r| r.get(0))
+            .query_row(
+                "SELECT reason FROM admin_grants WHERE grant_id=?1",
+                params![g.id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert!(reason.contains(r#""stage":0"#), "{reason}");
         let raw: Vec<u8> = conn
-            .query_row("SELECT receipt FROM admin_grants WHERE grant_id=?1", params![g.id], |r| r.get(0))
+            .query_row(
+                "SELECT receipt FROM admin_grants WHERE grant_id=?1",
+                params![g.id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&raw).unwrap()["stage"], 0);
 
@@ -3781,7 +4584,19 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let mut noop = input.clone();
         noop.id = "launcher-0012-0002".into();
         let (n2, g2, request2) = manage_req(&noop);
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts { grow: Some(&ctx), ..Default::default() }, &g2, &request2, &n2).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts {
+                grow: Some(&ctx),
+                ..Default::default()
+            },
+            &g2,
+            &request2,
+            &n2,
+        )
+        .unwrap();
         assert!(out.applied);
         assert_eq!(char_state(&conn)["advancement"], 1);
         assert_eq!(grant_rows(&conn), 2);
@@ -3792,7 +4607,19 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         gated.stage = Some(1);
         let (n3, g3, request3) = manage_req(&gated);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts { grow: Some(&ctx), ..Default::default() }, &g3, &request3, &n3).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts {
+                    grow: Some(&ctx),
+                    ..Default::default()
+                },
+                &g3,
+                &request3,
+                &n3
+            )
+            .unwrap_err(),
             "所选觉醒需要达到 50 级"
         );
         assert_eq!(grant_rows(&conn), 2);
@@ -3815,32 +4642,71 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         // 产物未就绪：四档一律拒在领号之前，什么都不落。
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "养成产物未就绪：gm-growth.json"
         );
         assert_eq!(grant_rows(&conn), 0);
         assert_eq!(char_state(&conn)["level"], 1);
 
         // 存档身份不符（别的 pack 的 config_version）：同一道 Go 拒绝话术。
-        conn.execute("UPDATE characters SET config_version='other-pack' WHERE id=10", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE characters SET config_version='other-pack' WHERE id=10",
+            [],
+        )
+        .unwrap();
         let ctx = crate::gmstat::test_context();
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts { grow: Some(&ctx), ..Default::default() }, &g, &request, &n).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts {
+                    grow: Some(&ctx),
+                    ..Default::default()
+                },
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "当前 PVF 职业目录与角色存档不匹配，已拒绝修改"
         );
         assert_eq!(grant_rows(&conn), 0);
 
         // 身份门也接受产物那次构建的归档校验（Go `BindGMIdentity` 允许的那条旧身份）：
         // 这一份夹具的 checksum 正是那枚 64 位 hex，所以这一笔要能写进去。
-        conn.execute("UPDATE characters SET config_version=?1 WHERE id=10", params![crate::gmstat::TEST_HASH])
-            .unwrap();
+        conn.execute(
+            "UPDATE characters SET config_version=?1 WHERE id=10",
+            params![crate::gmstat::TEST_HASH],
+        )
+        .unwrap();
         let mut legacy = input.clone();
         legacy.action = "level".into();
         legacy.id = "launcher-0013-0002".into();
         legacy.amount = 3;
         let (n2, g2, request2) = manage_req(&legacy);
-        assert!(manage_inner(&mut conn, &cat, 0, &ManageArtifacts { grow: Some(&ctx), ..Default::default() }, &g2, &request2, &n2).is_ok());
+        assert!(manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts {
+                grow: Some(&ctx),
+                ..Default::default()
+            },
+            &g2,
+            &request2,
+            &n2
+        )
+        .is_ok());
         assert_eq!(char_state(&conn)["level"], 3);
     }
 
@@ -3865,7 +4731,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
     /// 库里摆一行任务。`model` 传空串取产物那条已认模型；传别的就是为了钉
     /// 「进度模型尚未闭环」那一条拒绝。
     fn quest_row(conn: &mut rusqlite::Connection, id: u16, status: &str, model: &str) {
-        let model = if model.is_empty() { "single-meet-npc-remaining-v1" } else { model };
+        let model = if model.is_empty() {
+            "single-meet-npc-remaining-v1"
+        } else {
+            model
+        };
         conn.execute(
             "INSERT INTO character_quests(character_id,quest_id,status,progress,config_version,progress_model) \
              VALUES(10,?1,?2,3,?3,?4)",
@@ -3908,7 +4778,12 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
     }
 
     /// 预览一次计划（与事务内重算同一入口），执行只要它那份签名。
-    fn quest_plan(conn: &rusqlite::Connection, action: &str, target: u16, level: u8) -> crate::gmquest::GmQuestPlan {
+    fn quest_plan(
+        conn: &rusqlite::Connection,
+        action: &str,
+        target: u16,
+        level: u8,
+    ) -> crate::gmquest::GmQuestPlan {
         let file = crate::gmquest::test_quest_file();
         let ctx = crate::gmstat::test_context();
         let role = quest_role(conn);
@@ -3965,7 +4840,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(first.receipt["rewards"], false);
         assert_eq!(first.receipt["before"][0]["id"], 100);
         assert_eq!(first.receipt["before"][0]["progress"], 3);
-        assert_eq!(char_state(&conn), state_before, "任务写侧一个字节都不碰角色存档");
+        assert_eq!(
+            char_state(&conn),
+            state_before,
+            "任务写侧一个字节都不碰角色存档"
+        );
 
         // 2) 标记完成：重复 id 只处理一次（`before` 只有一行），时间戳落下。
         let mut next = ManageInput {
@@ -3978,7 +4857,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(quest_line(&conn, 101).unwrap().0, "completed");
         assert!(quest_closed_at(&conn, 101).is_some());
         assert_eq!(out.receipt["before"].as_array().unwrap().len(), 1);
-        assert_eq!(out.receipt["quests"].as_array().unwrap().len(), 2, "quests 原样回执界面带来的那份");
+        assert_eq!(
+            out.receipt["quests"].as_array().unwrap().len(),
+            2,
+            "quests 原样回执界面带来的那份"
+        );
 
         // 3) 放弃：整行删掉，不是写成别的状态。
         next = ManageInput {
@@ -3987,7 +4870,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..quest_input("quests.abandon", "launcher-0021-0003")
         };
         let (n, g, request) = manage_req(&next);
-        assert!(manage_inner(&mut conn, &cat, 0, &art, &g, &request, &n).unwrap().applied);
+        assert!(
+            manage_inner(&mut conn, &cat, 0, &art, &g, &request, &n)
+                .unwrap()
+                .applied
+        );
         assert!(quest_line(&conn, 102).is_none());
         assert_eq!(grant_rows(&conn), 3);
 
@@ -4005,15 +4892,22 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..quest_input("quests.ready", "launcher-0021-0004")
         };
         // 界面拿到 head 之后，别人动了这一行 —— 直接改库来模拟。
-        conn.execute("UPDATE character_quests SET progress=1 WHERE character_id=10 AND quest_id=105", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE character_quests SET progress=1 WHERE character_id=10 AND quest_id=105",
+            [],
+        )
+        .unwrap();
         stale.revision = "0".repeat(64);
         let (n, g, request) = manage_req(&stale);
         assert_eq!(
             manage_inner(&mut conn, &cat, 0, &art, &g, &request, &n).unwrap_err(),
             "角色或任务已变化，请刷新任务后再操作"
         );
-        assert_eq!(quest_line(&conn, 105).unwrap().1, 1, "拒绝的那笔不该把进度写成 0");
+        assert_eq!(
+            quest_line(&conn, 105).unwrap().1,
+            1,
+            "拒绝的那笔不该把进度写成 0"
+        );
         assert_eq!(grant_rows(&conn), 3, "拒绝的那笔不留下流水行");
     }
 
@@ -4068,8 +4962,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(grant_rows(&conn), 0);
 
         // 存档身份是归档校验值：养成那侧接受，任务这侧整档拒（不带 revision 才走到身份门）。
-        conn.execute("UPDATE characters SET config_version=?1 WHERE id=10", params![crate::gmstat::TEST_HASH])
-            .unwrap();
+        conn.execute(
+            "UPDATE characters SET config_version=?1 WHERE id=10",
+            params![crate::gmstat::TEST_HASH],
+        )
+        .unwrap();
         let input = ManageInput {
             quests: vec![100],
             ..quest_input("quests.complete", "launcher-0022-0003")
@@ -4097,12 +4994,18 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         // 请求门（Go 的 1..100）：追溯前置也要先过这一条，「恰好一个」留到事务里。
         let empty = quest_input("quests.prerequisites", "launcher-0023-0001");
-        assert_eq!(normalize_manage(&empty).unwrap_err(), "单次请选择 1 至 100 个任务");
+        assert_eq!(
+            normalize_manage(&empty).unwrap_err(),
+            "单次请选择 1 至 100 个任务"
+        );
         let many = ManageInput {
             quests: (1..=101u16).collect(),
             ..quest_input("quests.complete", "launcher-0023-0002")
         };
-        assert_eq!(normalize_manage(&many).unwrap_err(), "单次请选择 1 至 100 个任务");
+        assert_eq!(
+            normalize_manage(&many).unwrap_err(),
+            "单次请选择 1 至 100 个任务"
+        );
         // 主线的任务数不受这一条管（它带的是目标等级）。
         assert!(normalize_manage(&ManageInput {
             level: 50,
@@ -4117,7 +5020,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         };
         let (n, g, request) = manage_req(&input);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "任务产物未就绪：gm-quests.json"
         );
         assert_eq!(grant_rows(&conn), 0);
@@ -4142,12 +5054,20 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             };
             let (n, g, request) = manage_req(&bad);
             assert_eq!(
-                manage_inner(&mut conn, &cat, 0, &ManageArtifacts {
-                    grow: Some(&crate::gmstat::test_context()),
-                    quests: Some(&file),
-                    ..Default::default()
-                }, &g, &request, &n)
-                    .unwrap_err(),
+                manage_inner(
+                    &mut conn,
+                    &cat,
+                    0,
+                    &ManageArtifacts {
+                        grow: Some(&crate::gmstat::test_context()),
+                        quests: Some(&file),
+                        ..Default::default()
+                    },
+                    &g,
+                    &request,
+                    &n
+                )
+                .unwrap_err(),
                 "角色或任务已变化，请重新预览任务范围"
             );
         }
@@ -4159,12 +5079,20 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         };
         let (n, g, request) = manage_req(&two);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts {
-                grow: Some(&crate::gmstat::test_context()),
-                quests: Some(&file),
-                ..Default::default()
-            }, &g, &request, &n)
-                .unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts {
+                    grow: Some(&crate::gmstat::test_context()),
+                    quests: Some(&file),
+                    ..Default::default()
+                },
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "追溯前置需要选择一个任务"
         );
         assert_eq!(grant_rows(&conn), 0);
@@ -4197,7 +5125,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let (n1, g1, request1) = manage_req(&input);
         let out = manage_inner(&mut conn, &cat, 0, &art, &g1, &request1, &n1).unwrap();
         assert!(out.applied);
-        assert_eq!(out.message, "主线任务已按预览完成，未发放奖励；重新选择角色后生效");
+        assert_eq!(
+            out.message,
+            "主线任务已按预览完成，未发放奖励；重新选择角色后生效"
+        );
         assert_eq!(out.receipt["action"], "quests.mainline");
         assert_eq!(out.receipt["rewards"], false);
         assert_eq!(out.receipt["plan"]["signature"], plan.signature);
@@ -4289,7 +5220,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(grant_rows(&conn), 0);
         // 组里其余的每一条都不许留下：整组撤销，不是「完成到哪算哪」。
         for id in &plan.quests {
-            assert!(quest_line(&conn, *id).is_none() || *id == 100, "任务 {id} 该随事务一起退回去");
+            assert!(
+                quest_line(&conn, *id).is_none() || *id == 100,
+                "任务 {id} 该随事务一起退回去"
+            );
         }
 
         // 重新预览一次就写得进去了：计划短了一截，签名是新的。
@@ -4302,7 +5236,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..quest_input("quests.mainline", "launcher-0025-0002")
         };
         let (n, g, request) = manage_req(&fresh);
-        assert!(manage_inner(&mut conn, &cat, 0, &art, &g, &request, &n).unwrap().applied);
+        assert!(
+            manage_inner(&mut conn, &cat, 0, &art, &g, &request, &n)
+                .unwrap()
+                .applied
+        );
         assert_eq!(quest_line(&conn, 101).unwrap().0, "completed");
     }
 
@@ -4394,7 +5332,13 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
     /// 往流水表里塞一笔：`request`/`receipt` 按真表的形状写成 BLOB，`reason` 列填一句人话，
     /// 这样「动作键只在 request 里」这件事才测得出来——列同值的话，读错列也照样绿。
-    fn seed_grant(conn: &rusqlite::Connection, id: &str, request: &str, at: i64, character: Option<i64>) {
+    fn seed_grant(
+        conn: &rusqlite::Connection,
+        id: &str,
+        request: &str,
+        at: i64,
+        character: Option<i64>,
+    ) {
         conn.execute(
             "INSERT INTO admin_grants(grant_id,account_id,character_id,request,receipt,operator,reason,created_at) \
              VALUES(?1,1,?2,CAST(?3 AS BLOB),CAST('{\"applied\":true}' AS BLOB),'launcher','补发活动奖励',?4)",
@@ -4445,7 +5389,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(rows[2].character_name, "剑魂", "角色名跟着流水一起给");
 
         // 请求体原样带回来（不是 reason 列），界面展开时看到的才是当时真发出去的那份。
-        assert!(rows[2].request.contains("\"gold\":100"), "{}", rows[2].request);
+        assert!(
+            rows[2].request.contains("\"gold\":100"),
+            "{}",
+            rows[2].request
+        );
         assert!(!rows[2].request.contains("剑魂"), "{}", rows[2].request);
         assert_eq!(rows[2].receipt, "{\"applied\":true}");
         assert_eq!(rows[2].created_at, 1000);
@@ -4464,16 +5412,27 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
     fn grant_log_cuts_at_a_hundred_and_refuses_a_save_without_the_table() {
         let conn = test_conn();
         for i in 0..101 {
-            seed_grant(&conn, &format!("launcher-{i:03}"), r#"{"id":"x"}"#, i, Some(10));
+            seed_grant(
+                &conn,
+                &format!("launcher-{i:03}"),
+                r#"{"id":"x"}"#,
+                i,
+                Some(10),
+            );
         }
         let rows = grant_log(&conn).unwrap();
         assert_eq!(rows.len(), GRANT_LOG_LIMIT as usize);
         assert_eq!(rows[0].grant_id, "launcher-100", "留的是最新那一百笔");
-        assert_eq!(rows[rows.len() - 1].grant_id, "launcher-001", "最旧那笔被切掉");
+        assert_eq!(
+            rows[rows.len() - 1].grant_id,
+            "launcher-001",
+            "最旧那笔被切掉"
+        );
 
         // 表不在 ⇒ 报错，不给空表：空表和「一笔都没发过」在界面上长得一样，该说的话完全不同。
         let bare = rusqlite::Connection::open_in_memory().unwrap();
-        bare.execute_batch("CREATE TABLE characters(id INTEGER PRIMARY KEY,name TEXT);").unwrap();
+        bare.execute_batch("CREATE TABLE characters(id INTEGER PRIMARY KEY,name TEXT);")
+            .unwrap();
         let err = grant_log(&bare).unwrap_err();
         assert!(err.contains("admin_grants"), "{err}");
     }
@@ -4520,7 +5479,12 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         };
         if let Some(inv) = state.get("inventory") {
             p.gold = inv["gold"].as_u64().unwrap_or(0);
-            for row in inv.get("items").and_then(Value::as_array).into_iter().flatten() {
+            for row in inv
+                .get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 if row["Template"].as_u64() == Some(u64::from(template)) {
                     p.item_rows += 1;
                     p.item_total += row["Amount"].as_u64().unwrap_or(0);
@@ -4528,11 +5492,7 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             }
         }
         p.cera = conn
-            .query_row(
-                SQL_CERA_READ,
-                params![account],
-                |r| r.get::<_, i64>(0),
-            )
+            .query_row(SQL_CERA_READ, params![account], |r| r.get::<_, i64>(0))
             .unwrap_or(0);
         p.grants = conn
             .query_row("SELECT count(*) FROM admin_grants", [], |r| r.get(0))
@@ -4590,7 +5550,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
                 character: target.id,
                 gold: 123_456,
                 cera: 7,
-                items: vec![GrantItem { template: ITEM, amount: 3 }],
+                items: vec![GrantItem {
+                    template: ITEM,
+                    amount: 3,
+                    ..Default::default()
+                }],
                 reason: "实机彩排".into(),
             },
         )
@@ -4601,7 +5565,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(after.gold, before.gold + 123_456, "金币入账数不符");
         assert_eq!(after.cera, before.cera + 7, "点券入账数不符");
         assert_eq!(after.item_total, before.item_total + 3, "物品总数不符");
-        assert_eq!(after.state_kind, "blob", "写回的 state 必须仍是 BLOB（服务端就这么存）");
+        assert_eq!(
+            after.state_kind, "blob",
+            "写回的 state 必须仍是 BLOB（服务端就这么存）"
+        );
         assert_eq!(after.top_keys, before.top_keys, "state 顶层键集合被改动");
         assert_eq!(after.grants, before.grants + 1, "审计行没落");
 
@@ -4616,7 +5583,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
                 character: target.id,
                 gold: 123_456,
                 cera: 7,
-                items: vec![GrantItem { template: ITEM, amount: 3 }],
+                items: vec![GrantItem {
+                    template: ITEM,
+                    amount: 3,
+                    ..Default::default()
+                }],
                 reason: "实机彩排".into(),
             },
         )
@@ -4632,7 +5603,11 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
                 character: target.id,
                 gold: 999_999,
                 cera: 7,
-                items: vec![GrantItem { template: ITEM, amount: 3 }],
+                items: vec![GrantItem {
+                    template: ITEM,
+                    amount: 3,
+                    ..Default::default()
+                }],
                 reason: "实机彩排".into(),
             },
         );
@@ -4706,15 +5681,25 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let before = raw_state(&conn);
 
         let (n, g, request) = manage_req(&sp_input("launcher-0009-0001"));
-        let art = ManageArtifacts { state_backup: Some(&dst.0), ..Default::default() };
+        let art = ManageArtifacts {
+            state_backup: Some(&dst.0),
+            ..Default::default()
+        };
         let out = manage_inner(&mut conn, &cat, 0, &art, &g, &request, &n).unwrap();
         assert!(out.applied);
-        assert_eq!(char_state(&conn)["skill_points"], serde_json::json!([15, 9]));
+        assert_eq!(
+            char_state(&conn)["skill_points"],
+            serde_json::json!([15, 9])
+        );
 
         let names = backup_names(&dst.0);
         assert_eq!(names.len(), 1, "落点里只该有这一份：{names:?}");
         // 名字只带数字（账号 1、角色 10）：流水号与角色名都可能含路径字符，不进文件名。
-        assert!(names[0].starts_with("role-1-10-") && names[0].ends_with(".json"), "{}", names[0]);
+        assert!(
+            names[0].starts_with("role-1-10-") && names[0].ends_with(".json"),
+            "{}",
+            names[0]
+        );
         let path = dst.0.join(&names[0]);
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -4722,7 +5707,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             "备份必须是那一列的原文，逐字节，不是重新序列化过的 JSON"
         );
         // 落点写进回执：发放记录卡展开那一笔就能看到它。
-        assert_eq!(out.receipt["state_backup"].as_str(), Some(path.display().to_string().as_str()));
+        assert_eq!(
+            out.receipt["state_backup"].as_str(),
+            Some(path.display().to_string().as_str())
+        );
     }
 
     #[test]
@@ -4737,17 +5725,31 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let before = raw_state(&conn);
 
         let (n, g, request) = manage_req(&sp_input("launcher-0009-0002"));
-        let art = ManageArtifacts { state_backup: Some(&dst), ..Default::default() };
+        let art = ManageArtifacts {
+            state_backup: Some(&dst),
+            ..Default::default()
+        };
         let err = manage_inner(&mut conn, &cat, 0, &art, &g, &request, &n).unwrap_err();
         assert!(err.contains("备份"), "{err}");
         assert_eq!(raw_state(&conn), before, "备份没成，一个字节都不许写");
-        assert_eq!(grant_rows(&conn), 0, "被拒的这一笔连流水号都不留（同号可以再用）");
+        assert_eq!(
+            grant_rows(&conn),
+            0,
+            "被拒的这一笔连流水号都不留（同号可以再用）"
+        );
         assert!(backup_names(&dst).is_empty());
 
         // 同一笔换个能写的落点重放：流水号没被占住，这一笔照旧能成。
         let ok = TmpDir::new("manage-state-backup-retry");
-        let retry = ManageArtifacts { state_backup: Some(&ok.0), ..Default::default() };
-        assert!(manage_inner(&mut conn, &cat, 0, &retry, &g, &request, &n).unwrap().applied);
+        let retry = ManageArtifacts {
+            state_backup: Some(&ok.0),
+            ..Default::default()
+        };
+        assert!(
+            manage_inner(&mut conn, &cat, 0, &retry, &g, &request, &n)
+                .unwrap()
+                .applied
+        );
     }
 
     #[test]
@@ -4767,7 +5769,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ..Default::default()
         };
         let (n, g, request) = manage_req(&input);
-        let art = ManageArtifacts { state_backup: Some(&dst.0), ..Default::default() };
+        let art = ManageArtifacts {
+            state_backup: Some(&dst.0),
+            ..Default::default()
+        };
         let out = manage_inner(&mut conn, &cat, 0, &art, &g, &request, &n).unwrap();
         assert!(out.applied);
         assert!(backup_names(&dst.0).is_empty());
@@ -4777,7 +5782,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert!(!writes_character_state("materials.set"));
         assert!(!writes_character_state("quests.complete"));
         assert!(!writes_character_state("quests.mainline"));
-        for action in ["sp", "tp", "equipment.unlock", "inventory.amount", "inventory.delete", "equipment.durability", "level", "awakening"] {
+        for action in [
+            "sp",
+            "tp",
+            "equipment.unlock",
+            "inventory.amount",
+            "inventory.delete",
+            "equipment.durability",
+            "level",
+            "awakening",
+        ] {
             assert!(writes_character_state(action), "{action} 会覆盖那一列");
         }
     }
@@ -4801,16 +5815,24 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         assert_eq!(names.len(), 1, "{names:?}");
         assert!(names[0].starts_with("role-1-10-"), "{}", names[0]);
         assert_eq!(std::fs::read(dst.0.join(&names[0])).unwrap(), before);
-        assert!(out.receipt["state_backup"].as_str().unwrap().ends_with(&names[0]));
+        assert!(out.receipt["state_backup"]
+            .as_str()
+            .unwrap()
+            .ends_with(&names[0]));
 
         // 备份落点写不出来 ⇒ 这一笔整笔拒：金币没进背包、流水号也不留。
         std::fs::write(dir.0.join("blocker"), b"x").unwrap();
         let blocked = dir.0.join("blocker").join("state");
         let g2 = req("launcher-0010-0002", 1, 10, 50, 0, vec![]);
         let request2 = serde_json::to_vec(&g2).unwrap();
-        let err = grant_inner(&mut conn, &dir.0, &r, &g2, &request2, &cl, Some(&blocked)).unwrap_err();
+        let err =
+            grant_inner(&mut conn, &dir.0, &r, &g2, &request2, &cl, Some(&blocked)).unwrap_err();
         assert!(err.contains("备份"), "{err}");
-        assert_eq!(char_state(&conn)["inventory"]["gold"], 200, "第二笔一个字节都没写进去");
+        assert_eq!(
+            char_state(&conn)["inventory"]["gold"],
+            200,
+            "第二笔一个字节都没写进去"
+        );
         assert_eq!(grant_rows(&conn), 1, "只剩第一笔的流水");
     }
 
@@ -4913,7 +5935,12 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ),
             "时装：按件拆成两个附件，容器字节 1 在 equipment 之后"
         );
-        let gold = serde_json::to_string(&[crate::gmmail::MailAsset { id: 5, gold: 123_456, item: None }]).unwrap();
+        let gold = serde_json::to_string(&[crate::gmmail::MailAsset {
+            id: 5,
+            gold: 123_456,
+            item: None,
+        }])
+        .unwrap();
         assert_eq!(gold, r#"[{"id":5,"gold":123456}]"#, "金币附件没有 item 键");
 
         // 现网形态的那一枚：`kind` 是 equipment、只有部位旁表能认出它是时装。
@@ -4976,7 +6003,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let before = char_state(&conn);
         let input = mail_input("launcher-0026-0001", 123_456, 10327301, 7);
         let (n, g, request) = manage_req(&input);
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(out.applied);
 
         let rows = mails(&conn);
@@ -5001,14 +6037,21 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         // 号段：附件占 1、2，消息 AUTOINCREMENT 接着发 ⇒ 消息号一定大于所有附件号。
         assert_eq!(row["id"].as_i64().unwrap(), 3);
         let seq: i64 = conn
-            .query_row("SELECT seq FROM sqlite_sequence WHERE name='character_mail'", [], |r| r.get(0))
+            .query_row(
+                "SELECT seq FROM sqlite_sequence WHERE name='character_mail'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(seq, 3, "两个附件号 + 一封消息，高水位停在 3");
 
         // 存档一个字节都没动 ⇒ 这一档不该留改前备份（见 `writes_character_state`）。
         assert_eq!(char_state(&conn), before);
         assert!(!writes_character_state("mail.send"));
-        assert!(writes_character_state("sp.recalculate"), "排除式谓词别把别的档一起放掉");
+        assert!(
+            writes_character_state("sp.recalculate"),
+            "排除式谓词别把别的档一起放掉"
+        );
 
         // 回执与审计：mail_id 就是那一封的 id。
         assert_eq!(out.receipt["mail_id"], 3);
@@ -5023,19 +6066,49 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let mut conn = test_conn();
         let input = mail_input("launcher-0026-0002", 1_000, 0, 0);
         let (n, g, request) = manage_req(&input);
-        let first = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let first = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(first.applied);
-        let again = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let again = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert!(!again.applied);
         assert_eq!(again.message, "该笔操作已存在，未重复执行。");
-        assert_eq!(again.receipt["mail_id"], first.receipt["mail_id"], "回放的是原回执");
+        assert_eq!(
+            again.receipt["mail_id"], first.receipt["mail_id"],
+            "回放的是原回执"
+        );
         assert_eq!(mails(&conn).len(), 1);
         // 同流水号换个金额 ⇒ 拒，且不新增邮件。
         let mut other = input.clone();
         other.gold = 2_000;
         let (n2, g2, request2) = manage_req(&other);
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g2, &request2, &n2).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g2,
+                &request2,
+                &n2
+            )
+            .unwrap_err(),
             "流水号已用于不同操作"
         );
         assert_eq!(mails(&conn).len(), 1);
@@ -5053,20 +6126,50 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             ("未知", mail_input("launcher-0026-0006", 0, 777, 1)),
         ] {
             let (n, g, request) = manage_req(&input);
-            let err =
-                manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap_err();
-            assert!(err.contains("上限") || err.contains("每批") || err.contains("#27") || err.contains("物品库"), "{tag}：{err}");
+            let err = manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n,
+            )
+            .unwrap_err();
+            assert!(
+                err.contains("上限")
+                    || err.contains("每批")
+                    || err.contains("#27")
+                    || err.contains("物品库"),
+                "{tag}：{err}"
+            );
             assert_eq!(mails(&conn).len(), 0, "{tag}：一封都没发");
             assert_eq!(grant_rows(&conn), 0, "{tag}：流水号也没留");
             let seq = conn
-                .query_row("SELECT count(*) FROM sqlite_sequence WHERE name='character_mail'", [], |r| r.get::<_, i64>(0))
+                .query_row(
+                    "SELECT count(*) FROM sqlite_sequence WHERE name='character_mail'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
                 .unwrap();
             assert_eq!(seq, 0, "{tag}：附件号也不能留下尾巴");
         }
         // 同一支流水号在拒绝之后仍可再用。
         let input = mail_input("launcher-0026-0003", 500, 0, 0);
         let (n, g, request) = manage_req(&input);
-        assert!(manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap().applied);
+        assert!(
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap()
+            .applied
+        );
     }
 
     /// Go 的两道容量门：活着的消息 ≥255，或未领取的附件 + 本封附件 >255。
@@ -5091,7 +6194,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         fill(&mut conn, 255, r#"[{"id":1,"claimed":true}]"#);
         let (n, g, request) = manage_req(&mail_input("launcher-0026-0007", 1, 0, 0));
         assert_eq!(
-            manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap_err(),
+            manage_inner(
+                &mut conn,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "收件箱已满"
         );
         assert_eq!(mails(&conn).len(), 255);
@@ -5109,7 +6221,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         let input = mail_input("launcher-0026-0008", 1, 10327301, 1);
         let (n, g, request) = manage_req(&input);
         assert_eq!(
-            manage_inner(&mut conn2, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap_err(),
+            manage_inner(
+                &mut conn2,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap_err(),
             "收件箱已满"
         );
         assert_eq!(mails(&conn2).len(), 1, "被拒的那一封没进箱");
@@ -5117,7 +6238,19 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         // 同一份箱底：只带 1 个附件（金币）就还在门内 ⇒ 254+1 ≤ 255。
         let single = mail_input("launcher-0026-0009", 1, 0, 0);
         let (n, g, request) = manage_req(&single);
-        assert!(manage_inner(&mut conn2, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap().applied);
+        assert!(
+            manage_inner(
+                &mut conn2,
+                &cat,
+                0,
+                &ManageArtifacts::default(),
+                &g,
+                &request,
+                &n
+            )
+            .unwrap()
+            .applied
+        );
 
         // 已过期但没被算进容量的那一封（status=3 免疫过期）仍占位：口径与读侧一致。
         let mut conn3 = test_conn();
@@ -5129,7 +6262,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             )
             .unwrap();
         let (n, g, request) = manage_req(&mail_input("launcher-0026-0010", 1, 0, 0));
-        let out = manage_inner(&mut conn3, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn3,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert_eq!(out.receipt["capacity_before"]["messages"], 1);
         assert_eq!(out.receipt["capacity_before"]["unclaimed_assets"], 1);
 
@@ -5143,7 +6285,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
             )
             .unwrap();
         let (n, g, request) = manage_req(&mail_input("launcher-0026-0011", 1, 0, 0));
-        let out = manage_inner(&mut conn4, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn4,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         assert_eq!(out.receipt["capacity_before"]["messages"], 0);
     }
 
@@ -5159,22 +6310,51 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         )
         .unwrap();
         let (n, g, request) = manage_req(&mail_input("launcher-0026-0012", 1, 10327301, 1));
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         // 对方已经 ahead：我们的附件号 1、2 与消息号 3 都不许把它拉回来。
         let value: i64 = conn
-            .query_row("SELECT value FROM mailbox_id_sequence WHERE name='mailbox_id_seq'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM mailbox_id_sequence WHERE name='mailbox_id_seq'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(value, 100, "已经比它高时一步都不退");
         assert_eq!(out.receipt["mail_id"], 3);
         assert_eq!(mails(&conn)[0]["assets"][0]["id"], 1);
 
         // 反过来：那张表落后就必须追上（下一次发号才撞不上）。
-        conn.execute("UPDATE mailbox_id_sequence SET value=1 WHERE name='mailbox_id_seq'", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE mailbox_id_sequence SET value=1 WHERE name='mailbox_id_seq'",
+            [],
+        )
+        .unwrap();
         let (n, g, request) = manage_req(&mail_input("launcher-0026-0013", 1, 0, 0));
-        let out = manage_inner(&mut conn, &cat, 0, &ManageArtifacts::default(), &g, &request, &n).unwrap();
+        let out = manage_inner(
+            &mut conn,
+            &cat,
+            0,
+            &ManageArtifacts::default(),
+            &g,
+            &request,
+            &n,
+        )
+        .unwrap();
         let value: i64 = conn
-            .query_row("SELECT value FROM mailbox_id_sequence WHERE name='mailbox_id_seq'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM mailbox_id_sequence WHERE name='mailbox_id_seq'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(out.receipt["mail_id"], 5, "附件 4，消息 5");
         assert_eq!(value, 5, "对齐到我们自己号段的下一格");
@@ -5186,7 +6366,10 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
     #[test]
     fn mail_gates_run_before_the_transaction() {
         let base = mail_input("launcher-0026-0014", 1_000, 0, 0);
-        assert!(normalize_manage(&base).is_ok(), "只发金币：amount 为 0 也合法");
+        assert!(
+            normalize_manage(&base).is_ok(),
+            "只发金币：amount 为 0 也合法"
+        );
 
         let mut long_body = base.clone();
         long_body.body = "补".repeat(200); // 3 字节 × 200 = 600 > 512
@@ -5197,9 +6380,16 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
 
         let mut empty = base.clone();
         empty.gold = 0;
-        assert_eq!(normalize_manage(&empty).unwrap_err(), "邮件至少要带金币或物品");
+        assert_eq!(
+            normalize_manage(&empty).unwrap_err(),
+            "邮件至少要带金币或物品"
+        );
 
-        let unknown = ManageInput { action: "mail.delete".into(), gold: 1, ..base.clone() };
+        let unknown = ManageInput {
+            action: "mail.delete".into(),
+            gold: 1,
+            ..base.clone()
+        };
         assert_eq!(normalize_manage(&unknown).unwrap_err(), "不支持的管理操作");
     }
 
@@ -5218,7 +6408,12 @@ INSERT INTO characters(id,account_id,wire_id,name,profession,create_request,conf
         // 真背包里就在用的那枚可堆叠（与彩排发放同一件）。
         let stackable = cat.get(10327301).expect("真产物里没有 10327301");
         assert_eq!(stackable.kind, gmbuild::gmindex::Kind::Stackable);
-        assert_eq!(crate::gmmail::build_items(&cat, 1000, 10327301, 1).unwrap().len(), 1);
+        assert_eq!(
+            crate::gmmail::build_items(&cat, 1000, 10327301, 1)
+                .unwrap()
+                .len(),
+            1
+        );
 
         let mut kind_avatar = 0usize;
         let mut slot_avatar = 0usize;

@@ -123,7 +123,11 @@ fn as_pair(v: Option<&Value>) -> [u16; 2] {
     let mut out = [0u16; 2];
     if let Some(Value::Array(items)) = v {
         for (i, slot) in out.iter_mut().enumerate() {
-            *slot = items.get(i).and_then(|x| x.as_u64()).unwrap_or(0).min(u16::MAX as u64) as u16;
+            *slot = items
+                .get(i)
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0)
+                .min(u16::MAX as u64) as u16;
         }
     }
     out
@@ -218,10 +222,18 @@ fn bag_row_of(collection: &str, space: u8, raw: &Value) -> Result<GmBagRow, Stri
             _ => continue,
         };
         let ok = match field {
-            "slot" => as_number(value, u16::MAX as u64).map(|n| entry.slot = n as u16).is_some(),
-            "template" => as_number(value, u32::MAX as u64).map(|n| entry.template = n as u32).is_some(),
-            "group" => as_number(value, u8::MAX as u64).map(|n| entry.group = n as u8).is_some(),
-            _ => as_number(value, u32::MAX as u64).map(|n| entry.count = n as u32).is_some(),
+            "slot" => as_number(value, u16::MAX as u64)
+                .map(|n| entry.slot = n as u16)
+                .is_some(),
+            "template" => as_number(value, u32::MAX as u64)
+                .map(|n| entry.template = n as u32)
+                .is_some(),
+            "group" => as_number(value, u8::MAX as u64)
+                .map(|n| entry.group = n as u8)
+                .is_some(),
+            _ => as_number(value, u32::MAX as u64)
+                .map(|n| entry.count = n as u32)
+                .is_some(),
         };
         if !ok || seen.iter().any(|s| s == &name) {
             return Err(format!("背包物品字段 {key} 无效或重复"));
@@ -229,7 +241,11 @@ fn bag_row_of(collection: &str, space: u8, raw: &Value) -> Result<GmBagRow, Stri
         seen.push(name);
     }
     let has = |k: &str| seen.iter().any(|s| s == k);
-    if !has("slot") || entry.template == 0 || entry.count == 0 || (collection == "items" && !has("amount")) {
+    if !has("slot")
+        || entry.template == 0
+        || entry.count == 0
+        || (collection == "items" && !has("amount"))
+    {
         return Err("背包物品缺少位置、模板或数量".into());
     }
     entry.name = format!("物品 {}", entry.template);
@@ -273,7 +289,11 @@ fn enrich(cat: &Catalog, missing_stack_limit: u32, row: &mut GmBagRow) {
     row.level = item.level;
     if row.collection == "items" && item.kind == Kind::Stackable {
         // Go 还回落服务端 loot 目录与背包规则；产物里没带上限时用规则的缺省值。
-        row.stack_limit = if item.stack_limit != 0 { item.stack_limit } else { missing_stack_limit };
+        row.stack_limit = if item.stack_limit != 0 {
+            item.stack_limit
+        } else {
+            missing_stack_limit
+        };
         row.can_edit_count = row.stack_limit > 0;
     }
 }
@@ -295,7 +315,10 @@ fn summary_of(state: &Value) -> GmCharacterSummary {
 }
 
 fn gold_of(state: &Value) -> u32 {
-    as_uint(state.get("inventory").and_then(|v| v.get("gold")), u32::MAX as u64) as u32
+    as_uint(
+        state.get("inventory").and_then(|v| v.get("gold")),
+        u32::MAX as u64,
+    ) as u32
 }
 
 /// 只读连接：浏览不该因为服务端在跑而失败，也不该留下任何锁。
@@ -309,7 +332,12 @@ pub(crate) fn open_ro(db: &Path) -> Result<rusqlite::Connection, String> {
 
 /// `/api/character` 的本体：账号 + 角色双重定位（Go 只认角色 id，这里更严一档），
 /// 背包解不出来只记 `bag_error`，角色头部照旧返回。
-pub fn detail(root: &Root, cat: &Catalog, account: i64, character: i64) -> Result<GmCharacterDetail, String> {
+pub fn detail(
+    root: &Root,
+    cat: &Catalog,
+    account: i64,
+    character: i64,
+) -> Result<GmCharacterDetail, String> {
     let db = crate::saves::current_db(root)
         .ok_or_else(|| "存档还没有 SQLite 档：先启动一次游戏".to_string())?;
     // 规则文件只用来补「产物里没带上限」的可堆叠数量，读不到就按 0（该行为不可改数量）。
@@ -351,8 +379,8 @@ pub(crate) fn describe(
         Ok(v) => v,
         Err(e) => return Err(format!("角色不存在：{e}")),
     };
-    let state: Value =
-        serde_json::from_slice(&state_raw).map_err(|e| format!("角色存档不是可识别的 JSON：{e}"))?;
+    let state: Value = serde_json::from_slice(&state_raw)
+        .map_err(|e| format!("角色存档不是可识别的 JSON：{e}"))?;
 
     let mut bag_error = String::new();
     let mut bag: Vec<GmBagRow> = Vec::new();
@@ -389,7 +417,11 @@ pub(crate) fn describe(
         )
         .unwrap_or(0);
     let head = GmCharacterHead {
-        class_name: cat.class_of_role_full(profession, summary.advancement as i64, summary.awakening as i64),
+        class_name: cat.class_of_role_full(
+            profession,
+            summary.advancement as i64,
+            summary.awakening as i64,
+        ),
         id,
         account_id,
         wire_id,
@@ -404,7 +436,13 @@ pub(crate) fn describe(
             .map(|t| t.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_else(|| format!("{created_at}")),
     };
-    Ok(GmCharacterDetail { character: head, cera, summary, bag, bag_error })
+    Ok(GmCharacterDetail {
+        character: head,
+        cera,
+        summary,
+        bag,
+        bag_error,
+    })
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -524,7 +562,10 @@ pub(crate) fn apply_bag_edit(
             || edit.amount == 0
             || edit.amount > target.stack_limit
         {
-            return Err(format!("只能修改可堆叠物品，数量须为 1 至 {}", target.stack_limit));
+            return Err(format!(
+                "只能修改可堆叠物品，数量须为 1 至 {}",
+                target.stack_limit
+            ));
         }
         if edit.amount == target.count {
             return Err("数量没有变化".into());
@@ -548,7 +589,11 @@ pub(crate) fn apply_bag_edit(
                 .ok_or_else(|| "背包物品记录格式无效".to_string())?;
             // 真实存档用的是大写 Amount：按键名大小写不敏感找到那一个键，只换它的值。
             // 耐久同理（存档里是小写 durability），其余键（期限、record、refine）一律跟着留下。
-            let want = if edit.durability { "durability" } else { "amount" };
+            let want = if edit.durability {
+                "durability"
+            } else {
+                "amount"
+            };
             if let Some(key) = map.keys().find(|k| k.eq_ignore_ascii_case(want)).cloned() {
                 map.insert(key, Value::from(edit.amount));
             }
@@ -597,7 +642,10 @@ pub(crate) fn apply_numeric_edit(
         if value & !EQUIP_SLOT_MASK != 0 {
             return Err("只能开启辅助装备、魔法石和耳环栏".into());
         }
-        let held = map.get("equipment_slot_flags").cloned().unwrap_or(Value::from(0));
+        let held = map
+            .get("equipment_slot_flags")
+            .cloned()
+            .unwrap_or(Value::from(0));
         let flags = held.as_u64().unwrap_or(0) as u32 | value;
         if flags > u8::MAX as u32 {
             return Err("装备栏标志超出存档范围".into());
@@ -665,7 +713,9 @@ pub(crate) fn apply_sp_recalc(
         .ok_or_else(|| "角色存档格式无效".to_string())?;
     let level = as_uint(map.get("level"), u8::MAX as u64) as u8;
     if level == 0 || level > level_cap {
-        return Err(format!("当前等级 {level} 不在成长表范围内（上限 {level_cap}）"));
+        return Err(format!(
+            "当前等级 {level} 不在成长表范围内（上限 {level_cap}）"
+        ));
     }
     let mut total: u32 = 0;
     for crossed in 2..=u32::from(level) {
@@ -730,15 +780,20 @@ mod tests {
 
     #[test]
     fn container_errors_match_go_words() {
-        assert_eq!(read_containers(&state("[]")).unwrap_err(), "角色存档格式无效");
+        assert_eq!(
+            read_containers(&state("[]")).unwrap_err(),
+            "角色存档格式无效"
+        );
         assert_eq!(read_containers(&state(r#"{"level":1}"#)).unwrap().len(), 0);
         assert_eq!(
             read_containers(&state(r#"{"inventory":{"version":"other"}}"#)).unwrap_err(),
             "不支持的背包存档版本"
         );
         assert_eq!(
-            read_containers(&state(r#"{"inventory":{"version":"ordinary-bag-v1","items":7}}"#))
-                .unwrap_err(),
+            read_containers(&state(
+                r#"{"inventory":{"version":"ordinary-bag-v1","items":7}}"#
+            ))
+            .unwrap_err(),
             "背包容器 items 格式无效"
         );
         assert_eq!(
@@ -764,48 +819,91 @@ mod tests {
         assert!(!e.worn);
         // 耐久只在装备两张表里认；items 行即使带这一键也不给（界面不给耐久输入）。
         assert_eq!(
-            bag_row_of("items", 0, &state(r#"{"slot":5,"template":1,"amount":2,"durability":9}"#))
-                .unwrap()
-                .durability,
+            bag_row_of(
+                "items",
+                0,
+                &state(r#"{"slot":5,"template":1,"amount":2,"durability":9}"#)
+            )
+            .unwrap()
+            .durability,
             None
         );
         // 解不出数字（超 u16、字符串、null）就当这一行没有耐久，不报错也不给改。
         assert_eq!(
-            bag_row_of("equipment", 0, &state(r#"{"slot":9,"template":1,"durability":"48"}"#))
-                .unwrap()
-                .durability,
+            bag_row_of(
+                "equipment",
+                0,
+                &state(r#"{"slot":9,"template":1,"durability":"48"}"#)
+            )
+            .unwrap()
+            .durability,
             None
         );
         assert_eq!(
-            bag_row_of("equipment", 0, &state(r#"{"slot":9,"template":1,"durability":65536}"#))
-                .unwrap()
-                .durability,
+            bag_row_of(
+                "equipment",
+                0,
+                &state(r#"{"slot":9,"template":1,"durability":65536}"#)
+            )
+            .unwrap()
+            .durability,
             None
         );
         assert!(bag_row_of("items", 0, &state(r#"{"slot":65,"Template":1}"#)).is_err());
         assert!(bag_row_of("items", 0, &state(r#"{"template":1,"amount":2}"#)).is_err());
         assert!(bag_row_of("items", 0, &state(r#"{"slot":5,"template":1,"amount":0}"#)).is_err());
         // Go 只要求 slot 键在场，不校验它非零（快速浏览比写入侧宽松）。
-        assert_eq!(bag_row_of("items", 0, &state(r#"{"slot":0,"template":1,"amount":2}"#)).unwrap().slot, 0);
+        assert_eq!(
+            bag_row_of("items", 0, &state(r#"{"slot":0,"template":1,"amount":2}"#))
+                .unwrap()
+                .slot,
+            0
+        );
         // 大小写同键算重复（报出的键名取决于遍历先后，Go 那边是 map 随机序，不钉键名）；
         // null 值也算无效。
-        let dup = bag_row_of("items", 0, &state(r#"{"slot":5,"Slot":6,"template":1,"amount":2}"#))
-            .unwrap_err();
-        assert!(dup.starts_with("背包物品字段 ") && dup.ends_with(" 无效或重复"), "{dup}");
+        let dup = bag_row_of(
+            "items",
+            0,
+            &state(r#"{"slot":5,"Slot":6,"template":1,"amount":2}"#),
+        )
+        .unwrap_err();
+        assert!(
+            dup.starts_with("背包物品字段 ") && dup.ends_with(" 无效或重复"),
+            "{dup}"
+        );
         assert_eq!(
-            bag_row_of("items", 0, &state(r#"{"slot":5,"template":1,"amount":null}"#)).unwrap_err(),
+            bag_row_of(
+                "items",
+                0,
+                &state(r#"{"slot":5,"template":1,"amount":null}"#)
+            )
+            .unwrap_err(),
             "背包物品字段 amount 无效或重复"
         );
-        assert!(bag_row_of("worn", 0, &state(r#"{"slot":12,"template":1,"group":1}"#))
-            .expect("worn")
-            .worn);
+        assert!(
+            bag_row_of("worn", 0, &state(r#"{"slot":12,"template":1,"group":1}"#))
+                .expect("worn")
+                .worn
+        );
     }
 
     #[test]
     fn revision_is_stable_and_field_sensitive() {
-        let a = revision_of(state(r#"{"slot":5,"Template":1,"Amount":2}"#).as_object().unwrap());
-        let b = revision_of(state(r#"{"Amount":2,"Template":1,"slot":5}"#).as_object().unwrap());
-        let c = revision_of(state(r#"{"slot":5,"Template":1,"Amount":3}"#).as_object().unwrap());
+        let a = revision_of(
+            state(r#"{"slot":5,"Template":1,"Amount":2}"#)
+                .as_object()
+                .unwrap(),
+        );
+        let b = revision_of(
+            state(r#"{"Amount":2,"Template":1,"slot":5}"#)
+                .as_object()
+                .unwrap(),
+        );
+        let c = revision_of(
+            state(r#"{"slot":5,"Template":1,"Amount":3}"#)
+                .as_object()
+                .unwrap(),
+        );
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_eq!(a.len(), 64);
@@ -890,8 +988,11 @@ mod tests {
         assert_eq!(d.summary.skill_points, [0, 0]);
         assert_eq!(d.summary.awakening, 0);
 
-        let shape: Vec<(String, u8, u32)> =
-            d.bag.iter().map(|r| (r.collection.clone(), r.space, r.template)).collect();
+        let shape: Vec<(String, u8, u32)> = d
+            .bag
+            .iter()
+            .map(|r| (r.collection.clone(), r.space, r.template))
+            .collect();
         assert_eq!(
             shape,
             vec![
@@ -993,7 +1094,8 @@ mod tests {
         let s = edit_state();
         let row = view("items", 0, &s["inventory"]["items"][0], &cat);
         assert!(row.can_edit_count);
-        let (bytes, receipt) = apply_bag_edit(&s, &cat, 0, &edit_of(&row, 7, false)).expect("改数量");
+        let (bytes, receipt) =
+            apply_bag_edit(&s, &cat, 0, &edit_of(&row, 7, false)).expect("改数量");
         let after: Value = serde_json::from_slice(&bytes).expect("回写的是合法 JSON");
         let hit = &after["inventory"]["items"][0];
         assert_eq!(hit["Amount"], 7, "数量改掉");
@@ -1062,7 +1164,12 @@ mod tests {
         );
 
         // 物品库查不到 ⇒ 没有上限，也就不可改（宁可不给改，也不写个没依据的数）。
-        let unknown = view("items", 0, &state(r#"{"slot":70,"Template":590722598,"Amount":1}"#), &cat);
+        let unknown = view(
+            "items",
+            0,
+            &state(r#"{"slot":70,"Template":590722598,"Amount":1}"#),
+            &cat,
+        );
         assert!(!unknown.can_edit_count);
         assert!(apply_bag_edit(
             &state(r#"{"inventory":{"version":"ordinary-bag-v1","items":[{"slot":70,"Template":590722598,"Amount":1}]}}"#),
@@ -1121,7 +1228,13 @@ mod tests {
         let plain_row = view("equipment", 0, &plain["inventory"]["equipment"][0], &cat);
         assert_eq!(plain_row.durability, None);
         assert_eq!(
-            apply_bag_edit(&plain, &cat, 0, &durability_edit(&plain_row, 120, Some(120))).unwrap_err(),
+            apply_bag_edit(
+                &plain,
+                &cat,
+                0,
+                &durability_edit(&plain_row, 120, Some(120))
+            )
+            .unwrap_err(),
             "这一行没有耐久字段，不是装备行"
         );
 
@@ -1161,8 +1274,13 @@ mod tests {
         );
         let broken_row = view("equipment", 0, &broken["inventory"]["equipment"][0], &cat);
         assert_eq!(broken_row.durability, Some(0));
-        let (bytes, _) = apply_bag_edit(&broken, &cat, 0, &durability_edit(&broken_row, 120, Some(120)))
-            .expect("打坏的装备（耐久 0）可以修");
+        let (bytes, _) = apply_bag_edit(
+            &broken,
+            &cat,
+            0,
+            &durability_edit(&broken_row, 120, Some(120)),
+        )
+        .expect("打坏的装备（耐久 0）可以修");
         let after: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(after["inventory"]["equipment"][0]["durability"], 120);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1174,7 +1292,8 @@ mod tests {
         let s = edit_state();
 
         let row = view("items", 0, &s["inventory"]["items"][0], &cat);
-        let (bytes, receipt) = apply_bag_edit(&s, &cat, 0, &edit_of(&row, 0, true)).expect("删一行");
+        let (bytes, receipt) =
+            apply_bag_edit(&s, &cat, 0, &edit_of(&row, 0, true)).expect("删一行");
         let after: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(after["inventory"]["items"].as_array().unwrap().len(), 1);
         assert_eq!(after["inventory"]["items"][0]["slot"], 66);
@@ -1184,10 +1303,22 @@ mod tests {
         assert_eq!(receipt["before"]["Amount"], 3, "删前的记录要留在审计里");
 
         // 特殊空间也能删：那一行挂在 special_equipment["7"] 下面。
-        let pet = view("special_equipment", 7, &s["inventory"]["special_equipment"]["7"][0], &cat);
-        let (bytes, _) = apply_bag_edit(&s, &cat, 0, &edit_of(&pet, 0, true)).expect("删时装/宠物行");
+        let pet = view(
+            "special_equipment",
+            7,
+            &s["inventory"]["special_equipment"]["7"][0],
+            &cat,
+        );
+        let (bytes, _) =
+            apply_bag_edit(&s, &cat, 0, &edit_of(&pet, 0, true)).expect("删时装/宠物行");
         let after: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(after["inventory"]["special_equipment"]["7"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            after["inventory"]["special_equipment"]["7"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
         assert_eq!(after["inventory"]["special_equipment"]["1"], Value::Null);
 
         // 同一格有两行：拒绝修改（改哪一行都不该由我们猜）。
@@ -1240,8 +1371,16 @@ mod tests {
             "equipment_slot_flags":1,"attributes":{"物理攻击力":12.5},"learned_skills":[null,null],
             "inventory":{"version":"ordinary-bag-v1","gold":100,"items":[]}}"#;
         let (doc, _) = recalc(json, 5);
-        assert_eq!(doc["skill_points"], serde_json::json!([12, 12]), "跨过 2/3/4 三级");
-        assert_eq!(doc["technique_points"], serde_json::json!([2, 2]), "TP 一格都不碰");
+        assert_eq!(
+            doc["skill_points"],
+            serde_json::json!([12, 12]),
+            "跨过 2/3/4 三级"
+        );
+        assert_eq!(
+            doc["technique_points"],
+            serde_json::json!([2, 2]),
+            "TP 一格都不碰"
+        );
         assert_eq!(doc["experience"], 1200);
         assert_eq!(doc["equipment_slot_flags"], 1);
         assert_eq!(doc["attributes"]["物理攻击力"], 12.5);
@@ -1293,7 +1432,11 @@ mod tests {
             return;
         };
         let growth = gmbuild::growth::load_growth(Path::new(&dir)).expect("成长产物读不出");
-        println!("产物指纹 {}，每级授予 {} 档", growth.source.checksum, growth.skill_points.len());
+        println!(
+            "产物指纹 {}，每级授予 {} 档",
+            growth.source.checksum,
+            growth.skill_points.len()
+        );
         for (level, want) in [(1u8, 0u32), (70, 7470), (115, 19320), (150, 32670)] {
             let (bytes, receipt) = apply_sp_recalc(
                 &state(&format!(r#"{{"level":{level}}}"#)),
@@ -1302,9 +1445,16 @@ mod tests {
             )
             .unwrap();
             let doc: Value = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(doc["skill_points"], serde_json::json!([want, want]), "Lv.{level} 满值不符");
+            assert_eq!(
+                doc["skill_points"],
+                serde_json::json!([want, want]),
+                "Lv.{level} 满值不符"
+            );
             assert_eq!(receipt["total"], u64::from(want));
-            println!("Lv.{level} → 满值 {want}（跨过 {} 级）", receipt["levels_summed"].as_u64().unwrap());
+            println!(
+                "Lv.{level} → 满值 {want}（跨过 {} 级）",
+                receipt["levels_summed"].as_u64().unwrap()
+            );
         }
     }
 
@@ -1329,7 +1479,9 @@ mod tests {
         let db = Path::new(&db);
         let conn = open_ro(db).expect("真库存只读打不开");
         let mut stmt = conn
-            .prepare("SELECT account_id,id,name FROM characters WHERE deleted_at IS NULL ORDER BY id")
+            .prepare(
+                "SELECT account_id,id,name FROM characters WHERE deleted_at IS NULL ORDER BY id",
+            )
             .expect("schema 查询失败");
         let ids: Vec<(i64, i64, String)> = stmt
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
@@ -1359,7 +1511,10 @@ mod tests {
                 Err(e) => println!("账号 {} 角色 {} {} | 读失败：{}", account, id, name, e),
             }
         }
-        if let Some(d) = ids.first().and_then(|(a, i, _)| describe(db, &cat, missing, *a, *i).ok()) {
+        if let Some(d) = ids
+            .first()
+            .and_then(|(a, i, _)| describe(db, &cat, missing, *a, *i).ok())
+        {
             for row in &d.bag {
                 println!(
                     "  {} 空间{} 槽{} 组{} 模板{} 名{} 数量{} 可改={} 修订{}…",

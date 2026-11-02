@@ -102,8 +102,11 @@ const SQL_QUESTS: &str = "SELECT quest_id,status,progress,config_version,progres
 
 pub(crate) fn read_states(conn: &Connection, character: i64) -> Result<Vec<QuestState>, String> {
     let mut stmt = conn.prepare(SQL_QUESTS).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![character], state_of).map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    let rows = stmt
+        .query_map(params![character], state_of)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +212,12 @@ fn sign_mainline(role: &Role, plan: &GmQuestPlan) -> Result<String, String> {
     )))
 }
 
-fn sign_prerequisite(role: &Role, states: &[QuestState], target: u16, plan: &GmQuestPlan) -> Result<String, String> {
+fn sign_prerequisite(
+    role: &Role,
+    states: &[QuestState],
+    target: u16,
+    plan: &GmQuestPlan,
+) -> Result<String, String> {
     let body = serde_json::to_string(plan).map_err(|e| e.to_string())?;
     Ok(sha256_hex(&format!(
         "{{\"revision\":\"{}\",\"target\":{},\"plan\":{}}}",
@@ -282,7 +290,9 @@ fn resolve_mainline(
 ) -> (Vec<u16>, Vec<u16>, BTreeMap<u16, u16>) {
     let mut picks: HashMap<u32, u32> = HashMap::new();
     for id in eligible {
-        let Some(entry) = file.quests.get(id) else { continue };
+        let Some(entry) = file.quests.get(id) else {
+            continue;
+        };
         if let Some(a) = entry.answers.first() {
             picks.entry(a.question).or_insert(a.index);
         }
@@ -294,7 +304,9 @@ fn resolve_mainline(
             if completed.contains(id) {
                 continue;
             }
-            let Some(entry) = file.quests.get(id) else { continue };
+            let Some(entry) = file.quests.get(id) else {
+                continue;
+            };
             if collisions_blocked(&entry.collisions, completed) {
                 continue;
             }
@@ -324,7 +336,12 @@ fn resolve_mainline(
             break;
         }
     }
-    let blocked: Vec<u16> = eligible.iter().copied().filter(|id| !completed.contains(id)).map(|id| id as u16).collect();
+    let blocked: Vec<u16> = eligible
+        .iter()
+        .copied()
+        .filter(|id| !completed.contains(id))
+        .map(|id| id as u16)
+        .collect();
     let mut answer_picks: BTreeMap<u16, u16> = BTreeMap::new();
     for (q, idx) in picks {
         answer_picks.insert(q as u16, idx as u16);
@@ -342,7 +359,8 @@ pub(crate) fn mainline_plan(
     level: u8,
 ) -> Result<GmQuestPlan, String> {
     let mut out = GmQuestPlan::empty(level);
-    let state: Value = serde_json::from_slice(&role.state).map_err(|e| format!("角色存档不是合法 JSON：{e}"))?;
+    let state: Value =
+        serde_json::from_slice(&role.state).map_err(|e| format!("角色存档不是合法 JSON：{e}"))?;
     let view = view_of(&state)?;
     if level == 0 || u32::from(level) > view.level {
         return Err("主线目标等级必须在 1 至角色当前等级之间".into());
@@ -370,7 +388,12 @@ pub(crate) fn mainline_plan(
     for (id, entry) in &file.quests {
         let id = *id;
         let epic = entry.grade_texts.len() == 1 && entry.grade_texts[0] == "[epic]";
-        if id == 0 || id >= 65535 || !epic || entry.minimum_level > u32::from(level) || completed.contains(&id) {
+        if id == 0
+            || id >= 65535
+            || !epic
+            || entry.minimum_level > u32::from(level)
+            || completed.contains(&id)
+        {
             continue;
         }
         if !job_allowed(entry, &job, view) {
@@ -391,7 +414,8 @@ pub(crate) fn mainline_plan(
         eligible.push(id);
     }
 
-    let (selected, blocked_eligible, answer_picks) = resolve_mainline(file, &eligible, &mut completed);
+    let (selected, blocked_eligible, answer_picks) =
+        resolve_mainline(file, &eligible, &mut completed);
     out.quests = selected;
     out.blocked.extend(blocked_eligible);
     out.quests.sort_unstable();
@@ -434,7 +458,12 @@ impl<'a> Trace<'a> {
                 return Err(format!("前置任务 {id} 版本不匹配"));
             }
         }
-        if self.done.contains(&id) || old.as_ref().map(|q| q.status == "completed").unwrap_or(false) {
+        if self.done.contains(&id)
+            || old
+                .as_ref()
+                .map(|q| q.status == "completed")
+                .unwrap_or(false)
+        {
             return Ok(());
         }
         if self.visiting.contains(&id) {
@@ -464,8 +493,12 @@ impl<'a> Trace<'a> {
         }
         if let Some(a) = entry.answers.first() {
             for peer in &self.taken {
-                let Some(pe) = self.file.quests.get(peer) else { continue };
-                let Some(pa) = pe.answers.first() else { continue };
+                let Some(pe) = self.file.quests.get(peer) else {
+                    continue;
+                };
+                let Some(pa) = pe.answers.first() else {
+                    continue;
+                };
                 if pa.question == a.question && pa.index != a.index {
                     return Err(format!(
                         "任务 {id} 与已选分支（问答 {} 的第 {} 个答案）互斥，未作修改",
@@ -521,11 +554,17 @@ pub(crate) fn prerequisite_plan(
     let mut out = GmQuestPlan::empty(0);
     out.before = states.to_vec();
     identity_gate(role)?;
-    let state: Value = serde_json::from_slice(&role.state).map_err(|e| format!("角色存档不是合法 JSON：{e}"))?;
+    let state: Value =
+        serde_json::from_slice(&role.state).map_err(|e| format!("角色存档不是合法 JSON：{e}"))?;
     let view = view_of(&state)?;
-    let prior: HashMap<u32, QuestState> = states.iter().map(|q| (u32::from(q.id), q.clone())).collect();
+    let prior: HashMap<u32, QuestState> = states
+        .iter()
+        .map(|q| (u32::from(q.id), q.clone()))
+        .collect();
     let q = prior.get(&u32::from(target));
-    if q.map(|x| x.status != "accepted" || x.config_version != role.config_version).unwrap_or(true) {
+    if q.map(|x| x.status != "accepted" || x.config_version != role.config_version)
+        .unwrap_or(true)
+    {
         return Err("请选择当前角色进行中的任务".into());
     }
     let job = ctx
@@ -537,7 +576,9 @@ pub(crate) fn prerequisite_plan(
     }
     let mut taken: HashSet<u32> = HashSet::new();
     for q in states {
-        if q.config_version == role.config_version && (q.status == "accepted" || q.status == "completed") {
+        if q.config_version == role.config_version
+            && (q.status == "accepted" || q.status == "completed")
+        {
             taken.insert(u32::from(q.id));
         }
     }
@@ -617,7 +658,11 @@ fn display_name(file: &QuestFile, id: u32) -> String {
     }
 }
 
-pub(crate) fn build_view(file: &QuestFile, role: &Role, states: &[QuestState]) -> Result<GmQuestView, String> {
+pub(crate) fn build_view(
+    file: &QuestFile,
+    role: &Role,
+    states: &[QuestState],
+) -> Result<GmQuestView, String> {
     let identity = gmstat::save_identity();
     let state: Value = serde_json::from_slice(&role.state).unwrap_or(Value::Null);
     let level = if state.is_null() {
@@ -626,7 +671,10 @@ pub(crate) fn build_view(file: &QuestFile, role: &Role, states: &[QuestState]) -
         view_of(&state)?.level.min(u8::MAX as u32) as u8
     };
     let mut rows: Vec<GmQuestRow> = Vec::with_capacity(states.len());
-    let prior: HashMap<u32, QuestState> = states.iter().map(|q| (u32::from(q.id), q.clone())).collect();
+    let prior: HashMap<u32, QuestState> = states
+        .iter()
+        .map(|q| (u32::from(q.id), q.clone()))
+        .collect();
     for q in states {
         let entry = file.quests.get(&u32::from(q.id));
         let model = entry.map(|e| e.model.clone()).unwrap_or_default();
@@ -714,7 +762,12 @@ fn view(root: &Root, account: i64, character: i64) -> Result<GmQuestView, String
     build_view(&file, &role, &states)
 }
 
-pub(crate) fn preview_mainline(root: &Root, account: i64, character: i64, level: u8) -> Result<GmQuestPlan, String> {
+pub(crate) fn preview_mainline(
+    root: &Root,
+    account: i64,
+    character: i64,
+    level: u8,
+) -> Result<GmQuestPlan, String> {
     if account <= 0 || character <= 0 {
         return Err("请选择账号和角色".into());
     }
@@ -728,7 +781,12 @@ pub(crate) fn preview_mainline(root: &Root, account: i64, character: i64, level:
     mainline_plan(&file, &ctx, &role, &states, level)
 }
 
-pub(crate) fn preview_prerequisites(root: &Root, account: i64, character: i64, target: u16) -> Result<GmQuestPlan, String> {
+pub(crate) fn preview_prerequisites(
+    root: &Root,
+    account: i64,
+    character: i64,
+    target: u16,
+) -> Result<GmQuestPlan, String> {
     if account <= 0 || character <= 0 {
         return Err("请选择账号和角色".into());
     }
@@ -762,7 +820,8 @@ pub(crate) fn is_quest_action(action: &str) -> bool {
 const SQL_QUEST_ONE: &str = "SELECT quest_id,status,progress,config_version,progress_model \
  FROM character_quests WHERE character_id=?1 AND quest_id=?2";
 const SQL_ABANDON: &str = "DELETE FROM character_quests WHERE character_id=?1 AND quest_id=?2";
-const SQL_READY: &str = "UPDATE character_quests SET progress=0 WHERE character_id=?1 AND quest_id=?2";
+const SQL_READY: &str =
+    "UPDATE character_quests SET progress=0 WHERE character_id=?1 AND quest_id=?2";
 /// 与 Go 的 `mainlineSkipSQL` 同一份语义，但写成逐条 VALUES 形态。Go 那边用
 /// `INSERT ... SELECT json_each ... ON CONFLICT`，必须给 SELECT 补一个 `WHERE 1`，
 /// 否则 SQLite 的语法分析器把 `ON` 读成连表的 `JOIN ... ON`（实测在 DO 处报
@@ -811,7 +870,8 @@ pub(crate) fn apply(
         }
         before.push(q.clone());
         if input.action == "quests.abandon" {
-            conn.execute(SQL_ABANDON, params![role.id, id]).map_err(|e| e.to_string())?;
+            conn.execute(SQL_ABANDON, params![role.id, id])
+                .map_err(|e| e.to_string())?;
             continue;
         }
         let model = file.quests[&u32::from(*id)].model.clone();
@@ -819,9 +879,11 @@ pub(crate) fn apply(
             return Err(format!("任务 {id} 的进度模型尚未闭环，拒绝强制修改"));
         }
         if input.action == "quests.ready" {
-            conn.execute(SQL_READY, params![role.id, id]).map_err(|e| e.to_string())?;
+            conn.execute(SQL_READY, params![role.id, id])
+                .map_err(|e| e.to_string())?;
         } else {
-            conn.execute(SQL_COMPLETE_ONE, params![role.id, id]).map_err(|e| e.to_string())?;
+            conn.execute(SQL_COMPLETE_ONE, params![role.id, id])
+                .map_err(|e| e.to_string())?;
         }
     }
     let receipt = serde_json::json!({
@@ -920,34 +982,125 @@ pub(crate) fn test_quest_file() -> QuestFile {
     let mut quests: BTreeMap<u32, QuestEntry> = BTreeMap::new();
     for (id, e) in [
         (100u32, epic(100)),
-        (101, { let mut e = epic(101); e.prerequisite_groups = vec![vec![100]]; e }),
-        (102, { let mut e = epic(102); e.prerequisite_groups = vec![vec![101]]; e }),
-        (103, { let mut e = epic(103); e.prerequisite_groups = vec![vec![100], vec![101]]; e }),
-        (104, { let mut e = epic(104); e.prerequisite_groups = vec![vec![404]]; e }),
-        (105, { let mut e = epic(105); e.collisions = vec![300]; e }),
-        (106, { let mut e = epic(106); e.prerequisite_groups = vec![vec![105]]; e }),
-        (108, { let mut e = epic(108); e.prerequisite_groups = vec![vec![201]]; e }),
-        (109, { let mut e = epic(109); e.minimum_level = 60; e }),
-        (110, { let mut e = epic(110); e.jobs = vec!["[gunner]".into()]; e }),
-        (150, { let mut e = epic(150); e.grade_texts = vec!["[normal]".into()]; e }),
-        (200, { let mut e = epic(200); e.answers = vec![gmbuild::quest::QuestAnswer { question: 150, index: 0 }]; e }),
-        (201, { let mut e = epic(201); e.answers = vec![gmbuild::quest::QuestAnswer { question: 150, index: 1 }]; e }),
-        (300, { let mut e = epic(300); e.collisions = vec![400]; e }),
-        (400, { let mut e = epic(400); e.grade_texts = vec!["[normal]".into()]; e }),
-        (500, { let mut e = epic(500); e.pending = vec!["[reward] 读不进去".into()]; e }),
-        (600, { let mut e = epic(600); e.grow_usable = false; e.prerequisite_groups = vec![vec![601]]; e }),
-        (601, { let mut e = epic(601); e.prerequisite_groups = vec![vec![600]]; e }),
+        (101, {
+            let mut e = epic(101);
+            e.prerequisite_groups = vec![vec![100]];
+            e
+        }),
+        (102, {
+            let mut e = epic(102);
+            e.prerequisite_groups = vec![vec![101]];
+            e
+        }),
+        (103, {
+            let mut e = epic(103);
+            e.prerequisite_groups = vec![vec![100], vec![101]];
+            e
+        }),
+        (104, {
+            let mut e = epic(104);
+            e.prerequisite_groups = vec![vec![404]];
+            e
+        }),
+        (105, {
+            let mut e = epic(105);
+            e.collisions = vec![300];
+            e
+        }),
+        (106, {
+            let mut e = epic(106);
+            e.prerequisite_groups = vec![vec![105]];
+            e
+        }),
+        (108, {
+            let mut e = epic(108);
+            e.prerequisite_groups = vec![vec![201]];
+            e
+        }),
+        (109, {
+            let mut e = epic(109);
+            e.minimum_level = 60;
+            e
+        }),
+        (110, {
+            let mut e = epic(110);
+            e.jobs = vec!["[gunner]".into()];
+            e
+        }),
+        (150, {
+            let mut e = epic(150);
+            e.grade_texts = vec!["[normal]".into()];
+            e
+        }),
+        (200, {
+            let mut e = epic(200);
+            e.answers = vec![gmbuild::quest::QuestAnswer {
+                question: 150,
+                index: 0,
+            }];
+            e
+        }),
+        (201, {
+            let mut e = epic(201);
+            e.answers = vec![gmbuild::quest::QuestAnswer {
+                question: 150,
+                index: 1,
+            }];
+            e
+        }),
+        (300, {
+            let mut e = epic(300);
+            e.collisions = vec![400];
+            e
+        }),
+        (400, {
+            let mut e = epic(400);
+            e.grade_texts = vec!["[normal]".into()];
+            e
+        }),
+        (500, {
+            let mut e = epic(500);
+            e.pending = vec!["[reward] 读不进去".into()];
+            e
+        }),
+        (600, {
+            let mut e = epic(600);
+            e.grow_usable = false;
+            e.prerequisite_groups = vec![vec![601]];
+            e
+        }),
+        (601, {
+            let mut e = epic(601);
+            e.prerequisite_groups = vec![vec![600]];
+            e
+        }),
         // 纯循环对（两道可用性门都过），只用来钉「循环前置不擅自解开」这一条。
-        (610, { let mut e = epic(610); e.prerequisite_groups = vec![vec![611]]; e }),
-        (611, { let mut e = epic(611); e.prerequisite_groups = vec![vec![610]]; e }),
+        (610, {
+            let mut e = epic(610);
+            e.prerequisite_groups = vec![vec![611]];
+            e
+        }),
+        (611, {
+            let mut e = epic(611);
+            e.prerequisite_groups = vec![vec![610]];
+            e
+        }),
         (700, {
             let mut e = epic(700);
             e.target_present = true;
             e.target_valid = false;
             e
         }),
-        (800, { let mut e = epic(800); e.minimum_level = 60; e }),
-        (900, { let mut e = epic(900); e.grade_texts = vec!["[legend]".into()]; e }),
+        (800, {
+            let mut e = epic(800);
+            e.minimum_level = 60;
+            e
+        }),
+        (900, {
+            let mut e = epic(900);
+            e.grade_texts = vec!["[legend]".into()];
+            e
+        }),
     ] {
         quests.insert(id, e);
     }
@@ -1080,7 +1233,14 @@ mod tests {
         }
         // 存档身份不是当前契约：任务这一侧没有「归档校验值」那条旧身份分支。
         assert_eq!(
-            mainline_plan(&file, &ctx(), &role(50, 0, 0, crate::gmstat::TEST_HASH), &states, 50).unwrap_err(),
+            mainline_plan(
+                &file,
+                &ctx(),
+                &role(50, 0, 0, crate::gmstat::TEST_HASH),
+                &states,
+                50
+            )
+            .unwrap_err(),
             "任务目录与角色版本不匹配"
         );
         // 职业配置缺失（Go 的 `job == ""`）。
@@ -1092,7 +1252,8 @@ mod tests {
         );
         // 职业目录与存档不匹配：`state.source_sha256` 与 `.chr` 原文指纹不符。
         let mut tampered = good;
-        tampered.state = br#"{"level":50,"advancement":0,"awakening":0,"source_sha256":"deadbeef"}"#.to_vec();
+        tampered.state =
+            br#"{"level":50,"advancement":0,"awakening":0,"source_sha256":"deadbeef"}"#.to_vec();
         assert_eq!(
             mainline_plan(&file, &ctx(), &tampered, &states, 50).unwrap_err(),
             "当前 PVF 职业目录与角色存档不匹配，已拒绝修改"
@@ -1102,8 +1263,13 @@ mod tests {
     #[test]
     fn prerequisite_plan_traces_only_the_unmet_chain() {
         let file = test_quest_file();
-        let states = vec![st(100, "completed"), st(101, "accepted"), st(102, "accepted")];
-        let plan = prerequisite_plan(&file, &ctx(), &role(50, 0, 0, &identity()), &states, 102).unwrap();
+        let states = vec![
+            st(100, "completed"),
+            st(101, "accepted"),
+            st(102, "accepted"),
+        ];
+        let plan =
+            prerequisite_plan(&file, &ctx(), &role(50, 0, 0, &identity()), &states, 102).unwrap();
         // 101 是 102 唯一未闭合的前置；100 已完成，102 自己（目标任务）保留不动。
         assert_eq!(plan.quests, vec![101]);
         assert!(plan.blocked.is_empty());
@@ -1121,9 +1287,19 @@ mod tests {
             prerequisite_plan(&file, &ctx(), &r, &states, target).unwrap_err()
         };
         // 目标任务不处于进行中的当前存档身份。
-        assert_eq!(err(vec![st(102, "completed")], 102), "请选择当前角色进行中的任务");
         assert_eq!(
-            err(vec![{ let mut q = st(102, "accepted"); q.config_version = "other".into(); q }], 102),
+            err(vec![st(102, "completed")], 102),
+            "请选择当前角色进行中的任务"
+        );
+        assert_eq!(
+            err(
+                vec![{
+                    let mut q = st(102, "accepted");
+                    q.config_version = "other".into();
+                    q
+                }],
+                102
+            ),
             "请选择当前角色进行中的任务"
         );
         // 多条未满足的替代链：不擅自选边。
@@ -1138,27 +1314,67 @@ mod tests {
         );
         // 前置行属于别的存档身份。
         assert_eq!(
-            err(vec![st(104, "accepted"), { let mut q = st(404, "completed"); q.config_version = "other".into(); q }], 104),
+            err(
+                vec![st(104, "accepted"), {
+                    let mut q = st(404, "completed");
+                    q.config_version = "other".into();
+                    q
+                }],
+                104
+            ),
             "前置任务 404 版本不匹配"
         );
         // 前置的互斥同伴已被库里占用（accepted 也算占用）。
         assert_eq!(
-            err(vec![st(106, "accepted"), st(105, "accepted"), st(300, "accepted")], 106),
+            err(
+                vec![
+                    st(106, "accepted"),
+                    st(105, "accepted"),
+                    st(300, "accepted")
+                ],
+                106
+            ),
             "任务 105 与已接受或已完成的分支互斥，未作修改"
         );
         // 前置与库里已选的另一答案分支互斥。
         assert_eq!(
-            err(vec![st(108, "accepted"), st(201, "accepted"), st(200, "accepted")], 108),
+            err(
+                vec![
+                    st(108, "accepted"),
+                    st(201, "accepted"),
+                    st(200, "accepted")
+                ],
+                108
+            ),
             "任务 201 与已选分支（问答 150 的第 0 个答案）互斥，未作修改"
         );
         // 已经闭合的链不重复补：前置完成 → 本次没有要做的行。
-        let closed = prerequisite_plan(&file, &ctx(), &r, &[st(106, "accepted"), st(105, "completed")], 106).unwrap();
+        let closed = prerequisite_plan(
+            &file,
+            &ctx(),
+            &r,
+            &[st(106, "accepted"), st(105, "completed")],
+            106,
+        )
+        .unwrap();
         assert!(closed.quests.is_empty());
         // 等级、职业两道资格门，以及读不进去的段落。
-        assert_eq!(err(vec![st(109, "accepted")], 109), "任务 109 不满足当前角色职业或等级条件");
-        assert_eq!(err(vec![st(110, "accepted")], 110), "任务 110 不满足当前角色职业或等级条件");
-        assert_eq!(err(vec![st(700, "accepted")], 700), "任务 700 的目标角色条件待核实");
-        assert_eq!(err(vec![st(600, "accepted")], 600), "任务 600 的前置配置待核实");
+        assert_eq!(
+            err(vec![st(109, "accepted")], 109),
+            "任务 109 不满足当前角色职业或等级条件"
+        );
+        assert_eq!(
+            err(vec![st(110, "accepted")], 110),
+            "任务 110 不满足当前角色职业或等级条件"
+        );
+        assert_eq!(
+            err(vec![st(700, "accepted")], 700),
+            "任务 700 的目标角色条件待核实"
+        );
+        assert_eq!(
+            err(vec![st(600, "accepted")], 600),
+            "任务 600 的前置配置待核实"
+        );
     }
 
     #[test]
@@ -1168,8 +1384,16 @@ mod tests {
             let mut e = epic(120);
             e.target_present = true;
             e.target_triples = vec![
-                TargetChar { job: "[swordman]".into(), advancement: 1, awakening: -1 },
-                TargetChar { job: "[all]".into(), advancement: -1, awakening: 2 },
+                TargetChar {
+                    job: "[swordman]".into(),
+                    advancement: 1,
+                    awakening: -1,
+                },
+                TargetChar {
+                    job: "[all]".into(),
+                    advancement: -1,
+                    awakening: 2,
+                },
             ];
             f.quests.insert(120, e);
             f
@@ -1182,7 +1406,10 @@ mod tests {
         assert!(plan.quests.contains(&120));
         let plan = mainline_plan(&file, &ctx(), &role(50, 2, 0, &identity()), &states, 50).unwrap();
         assert!(!plan.quests.contains(&120));
-        assert!(!plan.blocked.contains(&120), "目标角色不匹配是排除，不是待核实");
+        assert!(
+            !plan.blocked.contains(&120),
+            "目标角色不匹配是排除，不是待核实"
+        );
     }
 
     #[test]
@@ -1197,9 +1424,18 @@ mod tests {
         assert_ne!(a, quest_revision(&r, &[moved.clone()]).unwrap());
         assert_ne!(a, quest_revision(&r, &[st(100, "completed")]).unwrap());
         assert_ne!(a, quest_revision(&r, &[one.clone(), moved]).unwrap());
-        assert_ne!(a, quest_revision(&role(50, 1, 0, &identity()), &[one.clone()]).unwrap());
-        assert_ne!(a, quest_revision(&role(50, 0, 0, "other"), &[one.clone()]).unwrap());
-        assert_ne!(a, quest_revision(&role(51, 0, 0, &identity()), &[one]).unwrap());
+        assert_ne!(
+            a,
+            quest_revision(&role(50, 1, 0, &identity()), &[one.clone()]).unwrap()
+        );
+        assert_ne!(
+            a,
+            quest_revision(&role(50, 0, 0, "other"), &[one.clone()]).unwrap()
+        );
+        assert_ne!(
+            a,
+            quest_revision(&role(51, 0, 0, &identity()), &[one]).unwrap()
+        );
     }
 
     #[test]
@@ -1268,9 +1504,15 @@ mod tests {
         // 出现的答案索引」，所以结果不随遍历顺序漂移。
         let mut f = test_quest_file();
         let mut low = epic(210);
-        low.answers = vec![QuestAnswer { question: 151, index: 2 }];
+        low.answers = vec![QuestAnswer {
+            question: 151,
+            index: 2,
+        }];
         let mut high = epic(211);
-        high.answers = vec![QuestAnswer { question: 151, index: 0 }];
+        high.answers = vec![QuestAnswer {
+            question: 151,
+            index: 0,
+        }];
         f.quests.insert(210, low);
         f.quests.insert(211, high);
         let states = vec![st(400, "completed")];
@@ -1285,8 +1527,13 @@ mod tests {
         // 全部候选都已完成时计划是空的：执行侧据此整笔拒
         // （Go 的「没有符合条件的未完成任务」），界面不会看到一次「成功但什么都没做」。
         let mut f = test_quest_file();
-        f.quests.retain(|id, q| q.grade_texts == ["[epic]".to_string()] && *id <= 102);
-        let states = vec![st(100, "completed"), st(101, "completed"), st(102, "completed")];
+        f.quests
+            .retain(|id, q| q.grade_texts == ["[epic]".to_string()] && *id <= 102);
+        let states = vec![
+            st(100, "completed"),
+            st(101, "completed"),
+            st(102, "completed"),
+        ];
         let plan = mainline_plan(&f, &ctx(), &role(50, 0, 0, &identity()), &states, 50).unwrap();
         assert!(plan.quests.is_empty());
         assert!(plan.blocked.is_empty());

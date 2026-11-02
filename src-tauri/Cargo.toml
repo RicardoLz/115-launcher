@@ -1,6 +1,6 @@
 [package]
 name = "dfo-launcher"
-version = "0.1.0"
+version = "1.0.0"
 description = "DFO-115US 单机一键启动器（Tauri 重构版）"
 edition = "2021"
 

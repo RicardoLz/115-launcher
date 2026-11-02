@@ -7,14 +7,14 @@ mod autofire;
 mod background;
 mod commands;
 mod config;
-mod health;
 mod gm;
 mod gmchar;
 mod gmgrant;
 mod gmmail;
-mod gmstat;
 mod gmquest;
 mod gmrebuild;
+mod gmstat;
+mod health;
 mod logbus;
 mod memory;
 mod mods;
@@ -25,8 +25,8 @@ mod ports;
 mod procutil;
 mod report;
 mod saves;
-mod session;
 mod self_updater;
+mod session;
 mod site;
 mod updater;
 
@@ -252,7 +252,10 @@ fn prepare_environment(
     }
 
     match config::ensure_storage_route(&root) {
-        Ok(route) if route.created => bus.ok(format!("本地存储已就绪：{}（库文件由服务端首次连接时创建）", route.describe)),
+        Ok(route) if route.created => bus.ok(format!(
+            "本地存储已就绪：{}（库文件由服务端首次连接时创建）",
+            route.describe
+        )),
         Ok(route) => bus.info(format!("本地存储无需初始化：{}", route.describe)),
         Err(err) => bus.error(err),
     }
@@ -280,7 +283,11 @@ fn prepare_environment(
     } else {
         match updater::check(&root) {
             Ok(info) if info.has_update => {
-                bus.info(format!("发现服务端新版本：{}（本机 {}）", info.latest_tag, info.current_tag.as_deref().unwrap_or("未部署")));
+                bus.info(format!(
+                    "发现服务端新版本：{}（本机 {}）",
+                    info.latest_tag,
+                    info.current_tag.as_deref().unwrap_or("未部署")
+                ));
                 let _ = app.emit("server-update-available", info);
             }
             Ok(_) => bus.ok("服务端已是最新。"),

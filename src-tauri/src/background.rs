@@ -78,7 +78,8 @@ fn vibrant(pixels: &image::RgbImage) -> Option<(u8, u8, u8)> {
             continue;
         }
         let avg = ((rs / count) as u8, (gs / count) as u8, (bs / count) as u8);
-        let score = count as f64 * saturation(f64::from(avg.0), f64::from(avg.1), f64::from(avg.2)).powf(1.2);
+        let score = count as f64
+            * saturation(f64::from(avg.0), f64::from(avg.1), f64::from(avg.2)).powf(1.2);
         if best.map(|(prev, _)| score > prev).unwrap_or(true) {
             best = Some((score, avg));
         }
@@ -213,7 +214,10 @@ pub fn install(root: &Root, candidate: &Path) -> Result<BackgroundState, String>
 /// 清空背景选择，只删设置里那一行，素材文件本身绝不碰。
 pub fn clear(root: &Root) -> Result<BackgroundState, String> {
     config::set_section(root, "ui", |ui| {
-        ui.insert("background".to_string(), serde_json::Value::String(String::new()));
+        ui.insert(
+            "background".to_string(),
+            serde_json::Value::String(String::new()),
+        );
     })?;
     Ok(state(root))
 }
@@ -251,7 +255,13 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dfo-bg-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("临时目录");
-        (Root { path: dir.clone(), source: "test" }, dir)
+        (
+            Root {
+                path: dir.clone(),
+                source: "test",
+            },
+            dir,
+        )
     }
 
     /// 收哪些扩展名是「WebView 能不能播」这件事的边界，不收的必须在门禁就挡掉。
@@ -421,7 +431,11 @@ mod tests {
         install(&root, &wall).expect("该收下的");
         let view = state(&root);
         assert_eq!(view.kind, "image");
-        assert!(near(hex_rgb(&view.accent), (12, 140, 146), 26), "{}", view.accent);
+        assert!(
+            near(hex_rgb(&view.accent), (12, 140, 146), 26),
+            "{}",
+            view.accent
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

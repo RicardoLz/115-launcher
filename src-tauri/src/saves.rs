@@ -97,14 +97,18 @@ fn human_size(bytes: u64) -> String {
 }
 
 fn size_text(path: &Path) -> String {
-    std::fs::metadata(path).map(|m| human_size(m.len())).unwrap_or_default()
+    std::fs::metadata(path)
+        .map(|m| human_size(m.len()))
+        .unwrap_or_default()
 }
 
 fn modified_text(path: &Path) -> String {
     let Ok(at) = path.metadata().and_then(|m| m.modified()) else {
         return "时间未知".to_string();
     };
-    DateTime::<Local>::from(at).format("%Y-%m-%d %H:%M").to_string()
+    DateTime::<Local>::from(at)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 fn open_ro(path: &Path) -> Result<Connection, String> {
@@ -137,7 +141,9 @@ fn table_present(conn: &Connection, name: &str) -> Result<bool, String> {
 fn audit(path: &Path) -> Result<Audit, String> {
     let mut head = [0_u8; 16];
     let mut file = File::open(path).map_err(|err| format!("读不到文件：{err}"))?;
-    let got = file.read(&mut head).map_err(|err| format!("读文件头失败：{err}"))?;
+    let got = file
+        .read(&mut head)
+        .map_err(|err| format!("读文件头失败：{err}"))?;
     if got < MAGIC.len() || head != *MAGIC {
         return Err("文件头不是 SQLite 库，认不出这是存档".to_string());
     }
@@ -175,7 +181,9 @@ fn sha256_of(path: &Path) -> Result<String, String> {
     let mut digest = Sha256::new();
     let mut buffer = vec![0_u8; 64 * 1024];
     loop {
-        let got = file.read(&mut buffer).map_err(|err| format!("读取失败：{err}"))?;
+        let got = file
+            .read(&mut buffer)
+            .map_err(|err| format!("读取失败：{err}"))?;
         if got == 0 {
             break;
         }
@@ -210,7 +218,9 @@ fn remove_sidecars(path: &Path) -> Vec<String> {
             let name = format!("{base}{suffix}");
             let side = Path::new(&name);
             match side.is_file() {
-                true => std::fs::remove_file(side).ok().map(|_| (*suffix).to_string()),
+                true => std::fs::remove_file(side)
+                    .ok()
+                    .map(|_| (*suffix).to_string()),
                 false => None,
             }
         })
@@ -223,7 +233,10 @@ fn sweep_empty_sidecars(path: &Path) {
     for suffix in JOURNAL_SUFFIXES {
         let name = format!("{base}{suffix}");
         let side = Path::new(&name);
-        let empty = side.is_file() && std::fs::metadata(side).map(|m| m.len() == 0).unwrap_or(false);
+        let empty = side.is_file()
+            && std::fs::metadata(side)
+                .map(|m| m.len() == 0)
+                .unwrap_or(false);
         if empty {
             let _ = std::fs::remove_file(side);
         }
@@ -341,7 +354,9 @@ pub fn state(root: &Root) -> SavesState {
     let dir = storage_dir(root);
     let Some(path) = current_db(root) else {
         let detail = match config::storage_route_state(root) {
-            StorageRoute::NeedsInit => "存档配置里还没有 sqlite_path：先跑一次游戏，服务端会自己建库".to_string(),
+            StorageRoute::NeedsInit => {
+                "存档配置里还没有 sqlite_path：先跑一次游戏，服务端会自己建库".to_string()
+            }
             StorageRoute::OtherDriver(driver) => format!(
                 "存档配置写的是 driver={driver}，启动器不替你改成 SQLite，这里没有可备份的库"
             ),
@@ -398,7 +413,8 @@ pub fn state(root: &Root) -> SavesState {
 
 /// 手工备份一份，名字带秒级时间戳，落在 `<存档目录>/backup/`。
 pub fn backup(root: &Root) -> Result<String, String> {
-    let db = current_db(root).ok_or_else(|| "这份包还没定下 SQLite 存档，没有可备份的东西".to_string())?;
+    let db = current_db(root)
+        .ok_or_else(|| "这份包还没定下 SQLite 存档，没有可备份的东西".to_string())?;
     if !db.is_file() {
         return Err(format!("{} 还不存在，先跑一次游戏再备份", db.display()));
     }
@@ -442,7 +458,10 @@ pub fn restore(root: &Root, candidate_raw: &str) -> Result<String, String> {
     if !candidate.is_file() {
         return Err(format!("{} 不是一个文件", candidate.display()));
     }
-    if std::fs::metadata(&candidate).map(|m| m.len() == 0).unwrap_or(true) {
+    if std::fs::metadata(&candidate)
+        .map(|m| m.len() == 0)
+        .unwrap_or(true)
+    {
         return Err("这份存档是 0 字节，不能拿它替换".to_string());
     }
     if same_file(&candidate, &db) {
@@ -454,7 +473,8 @@ pub fn restore(root: &Root, candidate_raw: &str) -> Result<String, String> {
     let snapshot: Option<PathBuf> = if db.is_file() {
         audit(&db).map_err(|err| format!("当前存档体检没过，不敢替换：{err}"))?;
         let dir = backup_dir(root);
-        std::fs::create_dir_all(&dir).map_err(|err| format!("创建 {} 失败：{err}", dir.display()))?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|err| format!("创建 {} 失败：{err}", dir.display()))?;
         let target = unique_backup_path(&dir, &stem(&db), "-replaced", "sqlite3");
         match vacuum_into(&db, &target) {
             Ok(()) => Some(target),
@@ -493,7 +513,9 @@ pub fn restore(root: &Root, candidate_raw: &str) -> Result<String, String> {
         std::fs::rename(&tmp, &db).map_err(|err| format!("替换失败：{err}"))?;
         renamed = true;
         remove_sidecars(&db);
-        audit(&db).map(|_| ()).map_err(|err| format!("替换后复检失败：{err}"))
+        audit(&db)
+            .map(|_| ())
+            .map_err(|err| format!("替换后复检失败：{err}"))
     })();
 
     match outcome {
@@ -549,7 +571,10 @@ pub fn delete_backup(root: &Root, candidate_raw: &str) -> Result<String, String>
         ));
     }
     if candidate.extension().and_then(|e| e.to_str()) != Some("sqlite3") {
-        return Err(format!("{} 不是 .sqlite3 备份，启动器不删它", candidate.display()));
+        return Err(format!(
+            "{} 不是 .sqlite3 备份，启动器不删它",
+            candidate.display()
+        ));
     }
     if !candidate.is_file() {
         return Err(format!("{} 不是一个文件", candidate.display()));
@@ -557,7 +582,8 @@ pub fn delete_backup(root: &Root, candidate_raw: &str) -> Result<String, String>
     if let Some(db) = current_db(root) {
         if same_file(&candidate, &db) {
             return Err(
-                "这份就是当前正在用的存档，删除按钮够不到它；要清当前档请在服务端那边处理".to_string(),
+                "这份就是当前正在用的存档，删除按钮够不到它；要清当前档请在服务端那边处理"
+                    .to_string(),
             );
         }
     }
@@ -566,8 +592,10 @@ pub fn delete_backup(root: &Root, candidate_raw: &str) -> Result<String, String>
         .iter()
         .filter_map(|suffix| {
             let side = PathBuf::from(format!("{base}{suffix}"));
-            let non_empty =
-                side.is_file() && std::fs::metadata(&side).map(|m| m.len() > 0).unwrap_or(false);
+            let non_empty = side.is_file()
+                && std::fs::metadata(&side)
+                    .map(|m| m.len() > 0)
+                    .unwrap_or(false);
             non_empty.then(|| side.display().to_string())
         })
         .collect();
@@ -587,7 +615,9 @@ pub fn delete_backup(root: &Root, candidate_raw: &str) -> Result<String, String>
     std::fs::remove_file(&candidate).map_err(|err| format!("删除失败：{err}"))?;
     // 空 sidecar 是这条备份自己留下的壳，跟着主文件一起走；非空的上面已经拦下了。
     sweep_empty_sidecars(&candidate);
-    Ok(format!("已删除备份「{name}」（{size}）。当前存档一个字节都没动。"))
+    Ok(format!(
+        "已删除备份「{name}」（{size}）。当前存档一个字节都没动。"
+    ))
 }
 
 #[cfg(test)]
@@ -647,7 +677,10 @@ mod tests {
             )
             .expect("造表");
         let wal = dir.join("t.sqlite3-wal");
-        let wal_live = wal.is_file() && std::fs::metadata(&wal).map(|m| m.len() > 0).unwrap_or(false);
+        let wal_live = wal.is_file()
+            && std::fs::metadata(&wal)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false);
 
         let verdict = vacuum_into(&db, &out).and_then(|()| audit(&out));
         drop(writer);
@@ -705,7 +738,10 @@ mod tests {
 
         let listed = list_backups(&root, None);
         assert_eq!(listed.len(), 0, "整库备份列表里出现了 state 里的 JSON");
-        assert!(delete_backup(&root, &sample.display().to_string()).is_err(), "删除按钮够不到 JSON 才对");
+        assert!(
+            delete_backup(&root, &sample.display().to_string()).is_err(),
+            "删除按钮够不到 JSON 才对"
+        );
         assert!(sample.is_file(), "被拒的删除不许把改前原文带走");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -764,7 +800,8 @@ mod tests {
         let (root, dir) = temp_root("del-wal");
         let backup = backup_dir(&root).join("with-wal.sqlite3");
         std::fs::write(&backup, b"x").expect("造备份");
-        std::fs::write(PathBuf::from(format!("{}-wal", backup.display())), b"data").expect("造非空 wal");
+        std::fs::write(PathBuf::from(format!("{}-wal", backup.display())), b"data")
+            .expect("造非空 wal");
 
         let err = delete_backup(&root, &backup.to_string_lossy()).unwrap_err();
         assert!(err.contains("非 0 字节的日志文件"), "{err}");

@@ -16,6 +16,7 @@ import ToolsPage from "./components/ToolsPage";
 import { PANELS } from "./components/panels";
 import { HealthSheet, PortsSheet } from "./components/ReportSheet";
 import WindowControls from "./components/WindowControls";
+import { UPDATES_ENABLED } from "./flags";
 import { DEFAULT_DOCK, DEFAULT_GM_DOCK, leaves, place, type DockNode, type GmKey, type PanelKey, type Zone } from "./dock";
 import { useGlideScroll } from "./glide";
 import { useTheme } from "./theme";
@@ -187,6 +188,8 @@ export default function App() {
         }),
         events.onServerUpdateAvailable((info) => {
           // 只记账，不弹窗：小红点等玩家自己点「检查更新」。
+          // 冻结期更新入口整个摘掉（见 flags.ts），这里也别再记账。
+          if (!UPDATES_ENABLED) return;
           if (info.has_update) setServerCheck(info);
         }),
         events.onUpdateProgress((next) => setProgress(next)),
@@ -228,12 +231,15 @@ export default function App() {
     take(commands.config(), setConfig);
     take(commands.backgroundState(), setBackground);
     // 启动器自身更新：探测到新版本只记着（界面点小红点），不再自动弹对话框；失败就当没有。
-    commands
-      .selfUpdateCheck()
-      .then((r) => {
-        if (alive && r.has_update) setSelfCheck(r);
-      })
-      .catch(() => {});
+    // 冻结期摘掉探测（见 flags.ts），命令层保留。
+    if (UPDATES_ENABLED) {
+      commands
+        .selfUpdateCheck()
+        .then((r) => {
+          if (alive && r.has_update) setSelfCheck(r);
+        })
+        .catch(() => {});
+    }
     return () => {
       alive = false;
     };
@@ -374,6 +380,7 @@ export default function App() {
   // 「检查更新」把两条更新各问一遍，有版本可取就把它交到右下角那枚开关上。
   // 先启动器、后服务端：自更完会重启进程，服务端那一轮重启后自然还能再检。
   const checkUpdates = async () => {
+    if (!UPDATES_ENABLED) return;
     setCheckingUpdate(true);
     try {
       const self = await commands.selfUpdateCheck();
@@ -479,14 +486,16 @@ export default function App() {
                 <button className="btn" onClick={openPorts}>
                   端口与残留
                 </button>
-                <button
-                  className="btn"
-                  data-dot={updateDot ? "on" : "off"}
-                  disabled={checkingUpdate || progress !== null}
-                  onClick={() => void checkUpdates()}
-                >
-                  {checkingUpdate ? "检查中…" : "检查更新"}
-                </button>
+                {UPDATES_ENABLED ? (
+                  <button
+                    className="btn"
+                    data-dot={updateDot ? "on" : "off"}
+                    disabled={checkingUpdate || progress !== null}
+                    onClick={() => void checkUpdates()}
+                  >
+                    {checkingUpdate ? "检查中…" : "检查更新"}
+                  </button>
+                ) : null}
               </>
             ) : null}
             <WindowControls theme={theme} onToggleTheme={toggleTheme} />
@@ -495,38 +504,40 @@ export default function App() {
           <main className="page" ref={pageRef}>
             {page === "home" ? (
               <div className="home-stage">
-                {/* 主页只剩背景、右下角那枚起停开关，与左下这张更新日志卡：状态与自检都收进顶栏和悬停提示里。 */}
-                <section className="card log-card" aria-label="更新日志">
-                  {/* 条目还没接：页签只管切「客户端」与「启动器」两块待填槽位，等谁来挂日志。 */}
-                  <div className="log-tabs" role="tablist" aria-label="更新日志">
-                    <button
-                      type="button"
-                      role="tab"
-                      id="log-tab-client"
-                      aria-selected={logTab === "client"}
-                      aria-controls="log-panel"
-                      onClick={() => setLogTab("client")}
-                    >
-                      客户端
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      id="log-tab-launcher"
-                      aria-selected={logTab === "launcher"}
-                      aria-controls="log-panel"
-                      onClick={() => setLogTab("launcher")}
-                    >
-                      启动器
-                    </button>
-                  </div>
-                  <div
-                    className="log-slot"
-                    role="tabpanel"
-                    id="log-panel"
-                    aria-labelledby={`log-tab-${logTab}`}
-                  />
-                </section>
+                {/* 更新日志卡冻结期整体摘下（见 flags.ts）：主页只剩背景与右下角那枚起停开关。 */}
+                {UPDATES_ENABLED ? (
+                  <section className="card log-card" aria-label="更新日志">
+                    {/* 条目还没接：页签只管切「客户端」与「启动器」两块待填槽位，等谁来挂日志。 */}
+                    <div className="log-tabs" role="tablist" aria-label="更新日志">
+                      <button
+                        type="button"
+                        role="tab"
+                        id="log-tab-client"
+                        aria-selected={logTab === "client"}
+                        aria-controls="log-panel"
+                        onClick={() => setLogTab("client")}
+                      >
+                        客户端
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="log-tab-launcher"
+                        aria-selected={logTab === "launcher"}
+                        aria-controls="log-panel"
+                        onClick={() => setLogTab("launcher")}
+                      >
+                        启动器
+                      </button>
+                    </div>
+                    <div
+                      className="log-slot"
+                      role="tabpanel"
+                      id="log-panel"
+                      aria-labelledby={`log-tab-${logTab}`}
+                    />
+                  </section>
+                ) : null}
               </div>
             ) : page === "settings" ? (
               <SettingsPage

@@ -66,7 +66,9 @@ fn tracks() -> &'static Mutex<HashMap<String, Track>> {
 }
 
 fn lock() -> MutexGuard<'static, HashMap<String, Track>> {
-    tracks().lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    tracks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn panel_of(label: &str) -> String {
@@ -80,9 +82,7 @@ pub fn panel_open(app: AppHandle, panel: String) -> Result<(), String> {
     let win = app
         .get_webview_window(&label)
         .ok_or_else(|| format!("没有「{panel}」这块面板"))?;
-    let main = app
-        .get_webview_window("main")
-        .ok_or("主窗口还没起来")?;
+    let main = app.get_webview_window("main").ok_or("主窗口还没起来")?;
     let scale = main.scale_factor().map_err(err)?;
 
     // 指针就当作落在新窗口标题栏上：拖出去时视觉上像同一块面板被拎了起来。

@@ -271,7 +271,7 @@ export const feedbackMeta: FeedbackMeta = {
   frequencies: ["偶发", "必现"],
   client_version: "inner-20261014",
   environment: "Windows 11 · 原生启动",
-  launcher_version: "0.1.0",
+  launcher_version: "1.0.0",
 };
 
 export const board: Board = {
@@ -282,14 +282,14 @@ export const board: Board = {
       category: "启动",
       status: "已修复",
       public_note: "已由启动器侧监听客户端退出解决",
-      fix_version: "0.1.0",
+      fix_version: "1.0.0",
       created: 1760000000,
       updated: 1760100000,
       report_count: 9,
       duplicate_count: 3,
       updates: [
         { created: 1760090000, status: "修复中", message: "定位到退出回调", fix_version: "" },
-        { created: 1760100000, status: "已修复", message: "已发版", fix_version: "0.1.0" },
+        { created: 1760100000, status: "已修复", message: "已发版", fix_version: "1.0.0" },
       ],
     },
     {

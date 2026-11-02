@@ -92,10 +92,7 @@ fn newest_guard_log(root: &Root) -> Option<(PathBuf, PathBuf)> {
     let mut best: Option<(SystemTime, PathBuf, PathBuf)> = None;
     for entry in entries.flatten() {
         let dir = entry.path();
-        let is_session = entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with("roles_");
+        let is_session = entry.file_name().to_string_lossy().starts_with("roles_");
         if !is_session || !dir.is_dir() {
             continue;
         }
@@ -232,21 +229,33 @@ mod tests {
 
     /// 这些行是从部署包 2026-10-19 那几场 `gateway.err` 里原样抄的，不是按格式编的。
     fn session_dir(base: &Path, tag: &str, body: &str) -> PathBuf {
-        let dir = base.join("server").join("work").join("dfo-lan").join("runtime").join(tag);
+        let dir = base
+            .join("server")
+            .join("work")
+            .join("dfo-lan")
+            .join("runtime")
+            .join(tag);
         std::fs::create_dir_all(&dir).expect("造会话目录");
         std::fs::write(dir.join("gateway.err"), body).expect("写 gateway.err");
         dir
     }
 
     fn root_at(base: &Path) -> Root {
-        Root { path: base.to_path_buf(), source: "test" }
+        Root {
+            path: base.to_path_buf(),
+            source: "test",
+        }
     }
 
     #[test]
     fn reads_the_real_guard_lines() {
         let base = std::env::temp_dir().join(format!("dfo-mem-rt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        session_dir(&base, "roles_persist_x_20261019_010406_next37", &format!("{ACTIVE_R2}{SAMPLE_1}{SAMPLE_2}{SAMPLE_3}{ENDED}"));
+        session_dir(
+            &base,
+            "roles_persist_x_20261019_010406_next37",
+            &format!("{ACTIVE_R2}{SAMPLE_1}{SAMPLE_2}{SAMPLE_3}{ENDED}"),
+        );
         let got = live(&root_at(&base)).expect("该读出实况");
         assert_eq!(got.pid, 29728);
         assert_eq!(got.session, "roles_persist_x_20261019_010406_next37");
@@ -283,8 +292,15 @@ mod tests {
         let base = std::env::temp_dir().join(format!("dfo-mem-none-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         assert!(live(&root_at(&base)).is_none(), "runtime 目录都没有");
-        session_dir(&base, "roles_persist_plain", "gateway starting\nlisten 7001\n");
-        assert!(live(&root_at(&base)).is_none(), "没有 MEMORY_GUARD active 行");
+        session_dir(
+            &base,
+            "roles_persist_plain",
+            "gateway starting\nlisten 7001\n",
+        );
+        assert!(
+            live(&root_at(&base)).is_none(),
+            "没有 MEMORY_GUARD active 行"
+        );
         // 只有 active、一条采样都还没有：也读不出占用，但这一场是活的。
         session_dir(&base, "roles_persist_fresh", ACTIVE_R2);
         assert!(live(&root_at(&base)).is_none());
@@ -296,9 +312,17 @@ mod tests {
     fn picks_the_session_still_writing() {
         let base = std::env::temp_dir().join(format!("dfo-mem-newest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        let older = session_dir(&base, "roles_persist_older", &format!("{ACTIVE_R2}{SAMPLE_1}"));
+        let older = session_dir(
+            &base,
+            "roles_persist_older",
+            &format!("{ACTIVE_R2}{SAMPLE_1}"),
+        );
         std::thread::sleep(std::time::Duration::from_millis(60));
-        session_dir(&base, "roles_persist_newer", &format!("{ACTIVE_R2}{SAMPLE_1}"));
+        session_dir(
+            &base,
+            "roles_persist_newer",
+            &format!("{ACTIVE_R2}{SAMPLE_1}"),
+        );
         // 往「旧」那场再写一条：它的 err 现在最新，目录却仍是新那场更晚。
         std::thread::sleep(std::time::Duration::from_millis(60));
         let mut file = std::fs::OpenOptions::new()
@@ -331,7 +355,10 @@ mod tests {
         assert_eq!(got.samples, 200);
         assert_eq!(got.series.len(), SERIES_MAX);
         assert_eq!(got.series.last().copied(), Some(299));
-        assert_eq!(got.series.first().copied(), Some(299 - (SERIES_MAX as u64 - 1)));
+        assert_eq!(
+            got.series.first().copied(),
+            Some(299 - (SERIES_MAX as u64 - 1))
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 

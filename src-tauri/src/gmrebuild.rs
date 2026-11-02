@@ -57,19 +57,59 @@ struct StepSpec {
 /// `refresh-bag` 换的是装备目录那一份戳，排在 `build-equipment` 之后，界面上一眼能看出先后。
 fn build_steps() -> Vec<StepSpec> {
     vec![
-        StepSpec { cmd: "build-names", outputs: &["names.client.json"], timeout: 300, needs_src: false, weight: 14 },
-        StepSpec { cmd: "build-items", outputs: &["items.index.json"], timeout: 3600, needs_src: false, weight: 23 },
+        StepSpec {
+            cmd: "build-names",
+            outputs: &["names.client.json"],
+            timeout: 300,
+            needs_src: false,
+            weight: 14,
+        },
+        StepSpec {
+            cmd: "build-items",
+            outputs: &["items.index.json"],
+            timeout: 3600,
+            needs_src: false,
+            weight: 23,
+        },
         StepSpec {
             cmd: "build-slots",
-            outputs: &["equipment.slots.json", "equipment.jobs.json", "item.rarity.json"],
+            outputs: &[
+                "equipment.slots.json",
+                "equipment.jobs.json",
+                "item.rarity.json",
+            ],
             timeout: 3600,
             needs_src: false,
             weight: 28,
         },
-        StepSpec { cmd: "build-growth", outputs: &["gm-growth.json"], timeout: 1200, needs_src: false, weight: 13 },
-        StepSpec { cmd: "build-quests", outputs: &["gm-quests.json"], timeout: 1800, needs_src: false, weight: 13 },
-        StepSpec { cmd: "build-equipment", outputs: &["equipment.current37.json"], timeout: 3600, needs_src: false, weight: 20 },
-        StepSpec { cmd: "refresh-bag", outputs: &["inventory.current37.json"], timeout: 120, needs_src: true, weight: 8 },
+        StepSpec {
+            cmd: "build-growth",
+            outputs: &["gm-growth.json"],
+            timeout: 1200,
+            needs_src: false,
+            weight: 13,
+        },
+        StepSpec {
+            cmd: "build-quests",
+            outputs: &["gm-quests.json"],
+            timeout: 1800,
+            needs_src: false,
+            weight: 13,
+        },
+        StepSpec {
+            cmd: "build-equipment",
+            outputs: &["equipment.current37.json"],
+            timeout: 3600,
+            needs_src: false,
+            weight: 20,
+        },
+        StepSpec {
+            cmd: "refresh-bag",
+            outputs: &["inventory.current37.json"],
+            timeout: 120,
+            needs_src: true,
+            weight: 8,
+        },
     ]
 }
 
@@ -86,7 +126,6 @@ const ARTIFACTS: [(&str, &str); 10] = [
     ("equipment.jobs.json", "职业限制表 · gmbuild"),
     ("item.rarity.json", "品级表 · gmbuild"),
 ];
-
 
 // ---------------------------------------------------------------------------
 // 视图
@@ -287,7 +326,8 @@ fn read_head(path: &Path, cap: u64) -> Result<String, String> {
 }
 
 fn read_tail(path: &Path, cap: u64) -> Result<String, String> {
-    let mut file = std::fs::File::open(path).map_err(|e| format!("读取 {}：{e}", path.display()))?;
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("读取 {}：{e}", path.display()))?;
     let len = file
         .metadata()
         .map_err(|e| format!("读取 {}：{e}", path.display()))?
@@ -322,9 +362,9 @@ fn load_artifact(dir: &Path, file: &'static str, role: &'static str) -> Artifact
             ..Default::default()
         }),
         // 这三份把 `source` 对象摆在最前面。
-        "gm-growth.json" | "gm-quests.json" | "equipment.current37.json" => {
-            read_head(&path, 8192).ok().map(|text| snapshot_of(&text, "\"checksum\""))
-        }
+        "gm-growth.json" | "gm-quests.json" | "equipment.current37.json" => read_head(&path, 8192)
+            .ok()
+            .map(|text| snapshot_of(&text, "\"checksum\"")),
         "inventory.current37.json" | "experience.compat90.json" => std::fs::read_to_string(&path)
             .ok()
             .map(|text| snapshot_of(&text, "\"source\"")),
@@ -426,7 +466,8 @@ fn audit_in(dir: &Path, pvf: Option<&Path>) -> AuditView {
     // 判据 1：三件 gmbuild 产物必须同一次构建。
     let mut consistent = false;
     if items.present && growth.present && quests.present {
-        if !is_hex64(&items.checksum) || !is_hex64(&growth.checksum) || !is_hex64(&quests.checksum) {
+        if !is_hex64(&items.checksum) || !is_hex64(&growth.checksum) || !is_hex64(&quests.checksum)
+        {
             issues.push(err(
                 "GM 产物的归档校验读不出来：文件可能不是 gmbuild 写的，或写到一半断了。"
                     .to_string(),
@@ -528,15 +569,28 @@ pub fn find_exe(root: &Root) -> Option<PathBuf> {
             candidates.push(PathBuf::from(value));
         }
     }
-    if let Some(exe) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+    if let Some(exe) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+    {
         candidates.push(exe.join("gmbuild.exe"));
         candidates.push(exe.join("bin").join("gmbuild.exe"));
     }
     candidates.push(root.path.join("gm-tool").join("bin").join("gmbuild.exe"));
     candidates.push(root.work_dir().join("bin").join("gmbuild.exe"));
     if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("gmbuild").join("target").join("release").join("gmbuild.exe"));
-        candidates.push(cwd.join("gmbuild").join("target").join("debug").join("gmbuild.exe"));
+        candidates.push(
+            cwd.join("gmbuild")
+                .join("target")
+                .join("release")
+                .join("gmbuild.exe"),
+        );
+        candidates.push(
+            cwd.join("gmbuild")
+                .join("target")
+                .join("debug")
+                .join("gmbuild.exe"),
+        );
     }
     candidates.into_iter().find(|p| p.is_file())
 }
@@ -686,13 +740,15 @@ pub fn rebuild(root: &Root, bus: &Bus, pvf: Option<PathBuf>) -> Result<RebuildVi
             .collect();
         let (ok, detail) = match &out {
             Err(text) => (false, text.clone()),
-            Ok((false, text)) => (
-                false,
-                format!("{cmd} 退出码非零：{}", tail_text(text, 800)),
-            ),
+            Ok((false, text)) => (false, format!("{cmd} 退出码非零：{}", tail_text(text, 800))),
             Ok((true, text)) if !missing.is_empty() => (
                 false,
-                format!("{} 没写出：{}；输出尾巴：{}", cmd, missing.join("、"), tail_text(text, 400)),
+                format!(
+                    "{} 没写出：{}；输出尾巴：{}",
+                    cmd,
+                    missing.join("、"),
+                    tail_text(text, 400)
+                ),
             ),
             Ok((true, text)) => (true, last_line(text)),
         };
@@ -875,9 +931,7 @@ pub async fn gm_rebuild(
     let bus = state.session.bus();
     let shared = state.gm.clone();
     crate::commands::join(move || {
-        let picked = pvf
-            .map(PathBuf::from)
-            .filter(|p| !p.as_os_str().is_empty());
+        let picked = pvf.map(PathBuf::from).filter(|p| !p.as_os_str().is_empty());
         let view = rebuild(&root, &bus, picked)?;
         shared.reload(&root)?;
         Ok(view)
@@ -915,10 +969,8 @@ mod tests {
 
     impl Tmp {
         fn new(tag: &str) -> Tmp {
-            let path = std::env::temp_dir().join(format!(
-                "dfo-gmrebuild-{tag}-{}",
-                std::process::id()
-            ));
+            let path =
+                std::env::temp_dir().join(format!("dfo-gmrebuild-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir_all(&path).expect("建临时目录");
             Tmp(path)
@@ -935,7 +987,14 @@ mod tests {
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const S: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
-    fn configs(tmp: &Tmp, items: &str, growth: &str, quests: &str, inv: &str, equip: &str) -> PathBuf {
+    fn configs(
+        tmp: &Tmp,
+        items: &str,
+        growth: &str,
+        quests: &str,
+        inv: &str,
+        equip: &str,
+    ) -> PathBuf {
         let dir = tmp.0.join("gm-tool").join("configs");
         std::fs::create_dir_all(&dir).expect("建产物目录");
         std::fs::write(
@@ -975,7 +1034,11 @@ mod tests {
         )
         .unwrap();
         std::fs::write(dir.join("names.client.json"), "{}").unwrap();
-        for table in ["equipment.slots.json", "equipment.jobs.json", "item.rarity.json"] {
+        for table in [
+            "equipment.slots.json",
+            "equipment.jobs.json",
+            "item.rarity.json",
+        ] {
             std::fs::write(
                 dir.join(table),
                 r#"{"source":"Script.pvf 全量导出","built_at":"2026-10-20T23:13:48+08:00","slots":{}}"#,
@@ -993,7 +1056,10 @@ mod tests {
         );
         assert_eq!(hex64_after(&growth, "\"checksum\"").as_deref(), Some(A));
         assert_eq!(number_after(&growth, "\"size\""), Some(865854418));
-        assert_eq!(string_after(&growth, "\"built_at\"").as_deref(), Some("2026-10-21T05:17:55+08:00"));
+        assert_eq!(
+            string_after(&growth, "\"built_at\"").as_deref(),
+            Some("2026-10-21T05:17:55+08:00")
+        );
 
         // 物品库：source 在尾巴上，而且前面可能有名字里带 source 的物品。
         let items = format!(
@@ -1012,7 +1078,10 @@ mod tests {
         let dir = configs(&tmp, A, A, A, A, A);
         let view = audit_in(&dir, None);
         assert!(view.consistent);
-        assert_eq!(view.artifacts.iter().filter(|a| a.present).count(), ARTIFACTS.len());
+        assert_eq!(
+            view.artifacts.iter().filter(|a| a.present).count(),
+            ARTIFACTS.len()
+        );
         assert!(
             view.issues.iter().all(|i| i.tone == "ok"),
             "{:?}",
@@ -1098,7 +1167,10 @@ mod tests {
     #[test]
     fn build_steps_cover_every_artifact_they_replace() {
         let produced: usize = build_steps().iter().map(|s| s.outputs.len()).sum();
-        assert_eq!(produced, 9, "七条子命令应产出九件（部位/职业/品级三件同一步）");
+        assert_eq!(
+            produced, 9,
+            "七条子命令应产出九件（部位/职业/品级三件同一步）"
+        );
         for spec in build_steps() {
             assert!(spec.timeout >= 60, "{} 超时太短", spec.cmd);
             assert!(!spec.outputs.is_empty(), "{} 没有产出文件", spec.cmd);
@@ -1162,14 +1234,23 @@ mod tests {
         let done = deploy_artifacts(&staging, &dir, "t").expect("替换应成功");
         assert_eq!(done.deployed, 9);
         assert_eq!(done.backed_up, 3);
-        assert_eq!(std::fs::read_to_string(dir.join("items.index.json")).unwrap(), "new");
-        assert_eq!(std::fs::read_to_string(dir.join("gm-quests.json")).unwrap(), "new");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("items.index.json")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("gm-quests.json")).unwrap(),
+            "new"
+        );
         assert_eq!(
             std::fs::read_to_string(done.backup.join("items.index.json")).unwrap(),
             "old"
         );
         // 不在清单里的文件不该被动。
-        assert_eq!(std::fs::read_to_string(dir.join("没被碰的文件.txt")).unwrap(), "keep");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("没被碰的文件.txt")).unwrap(),
+            "keep"
+        );
         assert!(done.backup.is_dir());
     }
 

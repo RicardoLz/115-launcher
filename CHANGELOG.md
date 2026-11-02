@@ -7,6 +7,51 @@
 
 ---
 
+## 2026-11-01 · 出包并换上：GM 发放带打造参数 + 更新入口整体摘除、版本号 V1.0（`37b8ca1c`）
+
+> TL;DR — 这一档装上之后玩家能看见的有四样：①「物品详情」卡在选中**装备**时多出四枚输入——强化（0..31）、
+> 增幅属性（无/体力/精神/力量/智力）与红字数值、锻造（0..8）、耐久覆盖（0 = 按物品定义）；②主页不再有
+> 「检查更新」按钮和「更新日志」卡，工具页不再有「服务端更新」区，启动器更新与服务端更新入口整体摘除；
+> ③标题横幅版本号换成 **v1.0.0**；④本地构建从此不再弹「有更新」小红点——更新探测整条关了，
+> 之前那条「千万别点『更新版本』」的坑从根上不存在了。这枚 exe 同代载入 GM 打造参数与更新摘除两轮改动。
+
+**换了哪一枚**
+
+| 文件 | 值 |
+| --- | --- |
+| `服务端\dfo-launcher.exe` | **9 874 432 B，SHA-256 `37b8ca1ceeb516fd5feae5982dcd0cbb448481368b3c54b99504510c2aeaaedb`**，与构建输出逐字节相同；内嵌 `index-CVCt5YT3.js` + `index-EHsHqi77.css`，与当轮 `dist\assets\` 同代 |
+| 被顶掉的上一代 | 正式存档 `%LOCALAPPDATA%\DFO115US-Tauri\exe-archive\dfo-launcher-63a30819-20261101-1103.exe`（9 872 896 B / `63a30819`，拷过去后重哈希相等），包内另有就近的 `dfo-launcher.exe.bak-63a30819`。回滚就把存档拷回正式名 |
+| 次序 | `tasklist` 确认没在跑 → `npx tauri build --no-bundle` → 读新 exe 内嵌包名确认同代 → 旧 exe 拷包外存档并比哈希 → 新 exe 先落同目录 `dfo-launcher.exe.new-37b8ca1c` 并比哈希 → 两次同卷 `mv` → 读回正式名的大小/哈希/包名。换完**没有运行过**，下次启动启动器生效 |
+
+**GM 打造参数（发放装备）落了什么**
+
+- 带打造参数的行物化 181 字节实例行：offset10 低五位 = 强化/增幅共用等级、offset19/20 = 红字类型与数值、
+  offset76 = 锻造镜像 + 顶层 `refine` 权威字段，布局与服务端 `internal/inventory/amplify.go`、
+  `configs/refine.json` 逐字对齐；纯耐久覆盖不物化实例行，旧请求 JSON 形状零漂移。
+- 类型门照抄服务端 `EditGMEquipment`：白名单外不收强化/增幅、锻造仅武器、时装与宠物一律拒绝。
+
+**更新入口摘除是怎么摘的（要还回来怎么办）**
+
+- 全部改动收在 [src/flags.ts](src/flags.ts) 一个开关：`export const UPDATES_ENABLED = false;`。
+  主页「检查更新」按钮、主页「更新日志」卡、工具页「服务端更新」区、启动时自更新探测、
+  服务端更新监听——五处都包在同一开关下，代码一行没删，**要恢复把这一个常量改回 `true` 重新出包即可**。
+- 版本号 `1.0.0` 落在 `tauri.conf.json` / `Cargo.toml` / `package.json`（及两处 lock 同步）。
+
+**验过什么**
+
+- `cargo test`（src-tauri）157 过：新增 `grant_equipment_craft_writes_record_and_refine` /
+  `grant_equipment_craft_kinds_are_gated` / `grant_rejects_out_of_range_craft_args` 三案，
+  逐字节断言 record 落点（10/19/20/76）与三类拒绝门。gmbuild 56 过、`npm run build` 0 错、
+  `check:sandbox` 0 错。
+- 沙盒实测（`npm run sandbox` + 无头浏览器）：选中装备出现四枚输入且钳位正确
+  （强化 max31、锻造 max8、耐久 max65535），选增幅「力量」后红字数值格出现，点「发放到存档」
+  回执「发放成功」；同一沙盒里确认主页无「检查更新」无「更新日志」、工具页无「服务端更新」、
+  横幅显示 v1.0.0。
+
+**仍未证的只有一条**：真人开一次启动器把上面四样各看一眼（#20，本机合成点击对真 App 无效）。
+更新摘除之后没有「更新版本」可点了；万一哪天恢复 `UPDATES_ENABLED`，那条「点了会覆盖 `服务端\`」
+的旧警告跟着一起回来，到时候再读 GM-交接 §5。
+
 ## 2026-10-23 01:20 · 出包并换上：七步重建与进度条第一次进壳（`63a30819`）
 
 > TL;DR — 上一档那句「要真人看见进度条得先出包换 exe」当场兑现了：`npx tauri build --no-bundle` 出了一枚

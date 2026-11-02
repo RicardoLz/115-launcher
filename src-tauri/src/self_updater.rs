@@ -4,8 +4,8 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::report::curl_exe;
 use crate::procutil;
+use crate::report::curl_exe;
 
 const REPO_API: &str = "https://api.github.com/repos/RicardoLz/115-launcher/releases/latest";
 const APP_EXE_NAME: &str = "dfo-launcher.exe";
@@ -139,7 +139,11 @@ pub fn apply_self_update<F: Fn(&str)>(info: &SelfUpdateCheck, log: F) -> Result<
     let mut last_code = -1;
     for (i, prefix) in ordered.iter().enumerate() {
         let url = format!("{}{}", prefix, info.download_url);
-        let label = if prefix.is_empty() { "直连 GitHub" } else { prefix.as_str() };
+        let label = if prefix.is_empty() {
+            "直连 GitHub"
+        } else {
+            prefix.as_str()
+        };
         log(&format!("[自更新] 尝试源 {}：{}", i + 1, label));
         // --speed-limit 1024: 速度低于 1KB/s 持续 --speed-time 10 秒就中止，切下一个源
         let code = procutil::command(&curl_exe())
@@ -158,15 +162,25 @@ pub fn apply_self_update<F: Fn(&str)>(info: &SelfUpdateCheck, log: F) -> Result<
             .status()
             .map_err(|e| format!("启动 curl 失败：{e}"))?;
         last_code = code.code().unwrap_or(-1);
-        if code.success() && new_exe.is_file() && new_exe.metadata().map(|m| m.len()).unwrap_or(0) > 1_000_000 {
-            let size = new_exe.metadata().map(|m| m.len() / 1024 / 1024).unwrap_or(0);
+        if code.success()
+            && new_exe.is_file()
+            && new_exe.metadata().map(|m| m.len()).unwrap_or(0) > 1_000_000
+        {
+            let size = new_exe
+                .metadata()
+                .map(|m| m.len() / 1024 / 1024)
+                .unwrap_or(0);
             log(&format!("[自更新] 下载完成（{} MB）", size));
             // 成功后更新镜像缓存
             let cache = serde_json::json!({ "prefix": prefix, "last_kbps": 0 });
             let _ = std::fs::write(&cache_path, cache.to_string());
             break;
         }
-        log(&format!("[自更新] 源 {} 失败（curl exit {}）", i + 1, last_code));
+        log(&format!(
+            "[自更新] 源 {} 失败（curl exit {}）",
+            i + 1,
+            last_code
+        ));
         let _ = std::fs::remove_file(&new_exe);
     }
 

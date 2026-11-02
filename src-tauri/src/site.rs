@@ -156,7 +156,13 @@ impl From<Submitted> for SubmitOutcome {
     }
 }
 
-pub fn board(page: u32, category: &str, status: &str, q: &str, sort: &str) -> Result<Board, String> {
+pub fn board(
+    page: u32,
+    category: &str,
+    status: &str,
+    q: &str,
+    sort: &str,
+) -> Result<Board, String> {
     let page = page.to_string();
     let raw = get(
         "/api/issues",
@@ -305,7 +311,10 @@ fn call(url: &str, payload: Option<&Value>) -> Result<Value, String> {
         429 => Err(or_note(&note, "反馈站正在限流，过几分钟再试")),
         0 => Err("连不上反馈站，检查一下网络再试".to_string()),
         other if other >= 500 => Err(or_note(&note, &format!("反馈站暂时不可用（HTTP {other}）"))),
-        other => Err(or_note(&note, &format!("反馈站拒绝了这次请求（HTTP {other}）"))),
+        other => Err(or_note(
+            &note,
+            &format!("反馈站拒绝了这次请求（HTTP {other}）"),
+        )),
     }
 }
 
@@ -359,12 +368,20 @@ fn int_of(parsed: &Value, key: &str) -> i64 {
 fn facets(counts: &HashMap<String, i64>, order: &[&str]) -> Vec<Facet> {
     let mut out: Vec<Facet> = order
         .iter()
-        .filter_map(|key| counts.get(*key).map(|n| Facet { key: (*key).to_string(), count: *n }))
+        .filter_map(|key| {
+            counts.get(*key).map(|n| Facet {
+                key: (*key).to_string(),
+                count: *n,
+            })
+        })
         .collect();
     let mut rest: Vec<Facet> = counts
         .iter()
         .filter(|(key, _)| !order.contains(&key.as_str()))
-        .map(|(key, n)| Facet { key: key.clone(), count: *n })
+        .map(|(key, n)| Facet {
+            key: key.clone(),
+            count: *n,
+        })
         .collect();
     rest.sort_by(|a, b| b.count.cmp(&a.count));
     out.extend(rest);

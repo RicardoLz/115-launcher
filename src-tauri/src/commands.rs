@@ -24,8 +24,8 @@ use crate::portguard::{self, Report};
 use crate::procutil;
 use crate::report;
 use crate::saves;
-use crate::session::{self, Mode, Phase, Readiness, Session, StartOutcome, Status};
 use crate::self_updater;
+use crate::session::{self, Mode, Phase, Readiness, Session, StartOutcome, Status};
 use crate::site;
 use crate::updater;
 
@@ -80,7 +80,9 @@ pub struct ActionRecord {
 }
 
 /// 只要结果的长任务：丢到 blocking 线程池，主线程一卡窗口就「未响应」。
-pub(crate) async fn block<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+pub(crate) async fn block<T: Send + 'static>(
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f)
         .await
         .map_err(|err| format!("后台任务异常终止：{err}"))
@@ -222,7 +224,8 @@ pub async fn set_account(
     let account = account.trim().to_string();
     if !valid_account(&account) {
         return Err(
-            "账号名只能用字母、数字、下划线与短横线，长度 1~32（它要进客户端的连接载荷）".to_string(),
+            "账号名只能用字母、数字、下划线与短横线，长度 1~32（它要进客户端的连接载荷）"
+                .to_string(),
         );
     }
     join(move || {
@@ -249,9 +252,7 @@ pub async fn set_account(
         session
             .bus()
             .info(format!("登录账号已设为「{account}」，下次「开始游戏」生效"));
-        Ok(ActionRecord {
-            message: account,
-        })
+        Ok(ActionRecord { message: account })
     })
     .await
 }
@@ -286,7 +287,10 @@ pub async fn set_auto_stop(
     join(move || {
         let root = session.root();
         config::set_setting(&root, |game| {
-            game.insert("autoStopOnClientExit".into(), serde_json::Value::Bool(enabled));
+            game.insert(
+                "autoStopOnClientExit".into(),
+                serde_json::Value::Bool(enabled),
+            );
         })?;
         let message = if enabled {
             "关闭游戏后自动停止服务端（下次「开始游戏」生效）"
@@ -350,9 +354,7 @@ pub async fn set_server_mod(
         Phase::Starting | Phase::Running | Phase::Stopping
     );
     if running {
-        return Err(
-            "服务端正在运行，mod 名单只在启动时读一次；请先停止服务端再改".to_string(),
-        );
+        return Err("服务端正在运行，mod 名单只在启动时读一次；请先停止服务端再改".to_string());
     }
     let message = join(move || mods::set_mod_enabled(&root, &id, enabled)).await?;
     session.bus().info(message.clone());
@@ -530,9 +532,11 @@ pub async fn feedback_mine(state: tauri::State<'_, AppState>) -> Result<Vec<site
     join(move || {
         let pairs = reporter.receipt_pairs();
         let list = site::my_reports(&pairs)?;
-        session
-            .bus()
-            .info(format!("我的反馈：本机存了 {} 个编号，站上认 {} 个", pairs.len(), list.len()));
+        session.bus().info(format!(
+            "我的反馈：本机存了 {} 个编号，站上认 {} 个",
+            pairs.len(),
+            list.len()
+        ));
         Ok(list)
     })
     .await
@@ -604,8 +608,9 @@ pub async fn discover_client(state: tauri::State<'_, AppState>) -> Result<Action
     let session = state.session.clone();
     join(move || {
         let root = session.root();
-        let found = config::discover_client(&root)
-            .ok_or_else(|| "没能自动找到客户端目录（要含 DFO.exe + Script.pvf）；请手动选一次".to_string())?;
+        let found = config::discover_client(&root).ok_or_else(|| {
+            "没能自动找到客户端目录（要含 DFO.exe + Script.pvf）；请手动选一次".to_string()
+        })?;
         let saved = config::set_client_dir(&root, &found)?;
         session
             .bus()
@@ -690,9 +695,10 @@ pub async fn autofire_set_master(
     let session = state.session.clone();
     let engine = state.autofire.clone();
     let view = block(move || engine.set_master(on)).await??;
-    session
-        .bus()
-        .info(format!("连发总开关已{}（界面里点的）", if on { "开" } else { "关" }));
+    session.bus().info(format!(
+        "连发总开关已{}（界面里点的）",
+        if on { "开" } else { "关" }
+    ));
     Ok(view)
 }
 
@@ -771,7 +777,9 @@ pub async fn memory_save(
 /// 面板 2 秒轮一次：采样本来就是 2 秒一条，再快也只是重读同一行。
 /// `None` = 读不到（没有会话、或那一场的日志里没有 MEMORY_GUARD），界面自己隐藏实况块。
 #[tauri::command]
-pub async fn memory_live(state: tauri::State<'_, AppState>) -> Result<Option<memory::Live>, String> {
+pub async fn memory_live(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<memory::Live>, String> {
     let root = state.root.clone();
     block(move || memory::live(&root)).await
 }
@@ -828,7 +836,8 @@ pub async fn saves_restore(
     );
     if running {
         return Err(
-            "服务端正在使用这份存档，请先停止服务端再替换（替换会整库覆盖，账号与角色都在里面）".to_string(),
+            "服务端正在使用这份存档，请先停止服务端再替换（替换会整库覆盖，账号与角色都在里面）"
+                .to_string(),
         );
     }
     join(move || {
@@ -1025,7 +1034,9 @@ pub async fn server_update_apply(
 }
 
 #[tauri::command]
-pub async fn self_update_check(state: tauri::State<'_, AppState>) -> Result<self_updater::SelfUpdateCheck, String> {
+pub async fn self_update_check(
+    state: tauri::State<'_, AppState>,
+) -> Result<self_updater::SelfUpdateCheck, String> {
     let bus = state.session.bus().clone();
     join(move || {
         bus.info("[自更新] 正在检查启动器更新…");
@@ -1033,7 +1044,10 @@ pub async fn self_update_check(state: tauri::State<'_, AppState>) -> Result<self
         match &result {
             Ok(info) => {
                 if info.has_update {
-                    bus.info(format!("[自更新] 发现新版本 v{}（当前 v{}）", info.latest_version, info.current_version));
+                    bus.info(format!(
+                        "[自更新] 发现新版本 v{}（当前 v{}）",
+                        info.latest_version, info.current_version
+                    ));
                 } else {
                     bus.info(format!("[自更新] 已是最新（v{}）", info.current_version));
                 }
@@ -1041,7 +1055,8 @@ pub async fn self_update_check(state: tauri::State<'_, AppState>) -> Result<self
             Err(e) => bus.warn(format!("[自更新] 检查失败：{e}")),
         }
         result
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1070,7 +1085,8 @@ pub async fn self_update_apply(
                 Err(e)
             }
         }
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]

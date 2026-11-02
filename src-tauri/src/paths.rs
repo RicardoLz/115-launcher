@@ -33,11 +33,7 @@ pub struct Root {
 
 impl Root {
     pub fn log_line(&self) -> String {
-        format!(
-            "使用的整合包：{}（{}）",
-            self.path.display(),
-            self.source
-        )
+        format!("使用的整合包：{}（{}）", self.path.display(), self.source)
     }
 
     pub fn launcher_local_json(&self) -> PathBuf {
@@ -65,9 +61,7 @@ impl Root {
     }
 
     pub fn default_sqlite_path(&self) -> PathBuf {
-        self.runtime_dir()
-            .join("storage")
-            .join("dfolan.sqlite3")
+        self.runtime_dir().join("storage").join("dfolan.sqlite3")
     }
 
     pub fn mods_dir(&self) -> PathBuf {

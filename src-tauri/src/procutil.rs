@@ -218,7 +218,7 @@ impl Drop for ProcHandle {
 impl ProcHandle {
     pub fn open(pid: u32) -> Option<ProcHandle> {
         use windows::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_ACCESS_RIGHTS,
+            OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
         };
         // SYNCHRONIZE(0x100000)：不加它，WaitForSingleObject 直接 WAIT_FAILED。
         let rights = PROCESS_ACCESS_RIGHTS(PROCESS_QUERY_LIMITED_INFORMATION.0 | 0x0010_0000);
@@ -340,7 +340,9 @@ pub fn run_with_lines(
                 if n == 0 {
                     break;
                 }
-                let text = String::from_utf8_lossy(&raw).trim_end_matches(['\r', '\n']).to_string();
+                let text = String::from_utf8_lossy(&raw)
+                    .trim_end_matches(['\r', '\n'])
+                    .to_string();
                 raw.clear();
                 if tx.send(Msg::Line { stream, text }).is_err() {
                     break;
@@ -381,5 +383,7 @@ pub fn run_with_lines(
     };
     let mut text = parts[0].clone();
     text.push_str(&parts[1]);
-    status.map(|ok| (ok, text)).map_err(|err| format!("{label} 执行失败：{err}"))
+    status
+        .map(|ok| (ok, text))
+        .map_err(|err| format!("{label} 执行失败：{err}"))
 }

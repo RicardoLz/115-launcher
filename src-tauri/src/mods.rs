@@ -354,7 +354,11 @@ fn server_mods(root: &Root, scan: &GatewayScan) -> ServerMods {
         let written = fs::metadata(&enabled_path).and_then(|m| m.modified()).ok();
         let logged = root
             .newest_run_dir()
-            .map(|dir| fs::metadata(dir.join("gateway.err")).and_then(|m| m.modified()).ok())
+            .map(|dir| {
+                fs::metadata(dir.join("gateway.err"))
+                    .and_then(|m| m.modified())
+                    .ok()
+            })
             .flatten();
         if let (Some(written), Some(logged)) = (written, logged) {
             if written <= logged {
@@ -553,9 +557,10 @@ fn client_mods(root: &Root) -> ClientMods {
 
     let mut bypass_note = String::new();
     if switchable && matches!(host.0, ManifestState::Present) && !host_reduced {
-        bypass_note = "宿主清单不是缩减版（mod-loader 之外还有声明，或没关 autoDiscover/recurse）：\
+        bypass_note =
+            "宿主清单不是缩减版（mod-loader 之外还有声明，或没关 autoDiscover/recurse）：\
                        这些插件仍会被宿主直接装上，开关会被绕过。"
-            .to_string();
+                .to_string();
     } else if switchable && !matches!(host.0, ManifestState::Present) {
         bypass_note = "宿主清单 plugins.json 不在场或认不出形状：宿主回退旧行为，\
                        自己把 .115us-mods 下的每个 DLL 都装上，那些开关照样被绕过\
@@ -606,15 +611,17 @@ fn client_mods(root: &Root) -> ClientMods {
         if declared_rel.contains(&norm_rel(&rel)) {
             continue;
         }
-        let status = read_status(&base.join(rel_dir(&rel)), &status_names("", &base_name(&rel)));
+        let status = read_status(
+            &base.join(rel_dir(&rel)),
+            &status_names("", &base_name(&rel)),
+        );
         let enabled = if switchable {
             // 缩减清单之后宿主不再扫这个根：只有 mods\ 的子目录会被统一入口补装。
             auto_discover && !rel_in_legacy_root(&rel)
         } else {
             !matches!(host.0, ManifestState::Present) || auto_discover
         };
-        let (extra_loaded, extra_note, extra_return) =
-            loader.row_of(&stem_of(&base_name(&rel)));
+        let (extra_loaded, extra_note, extra_return) = loader.row_of(&stem_of(&base_name(&rel)));
         plugins.push(ClientPlugin {
             dll: base_name(&rel),
             id: stem_of(&base_name(&rel)),
@@ -851,14 +858,7 @@ fn read_loader_status(switch_dir: &Path) -> LoaderStatus {
         rows: file
             .mods
             .into_iter()
-            .map(|row| {
-                (
-                    row.id.to_lowercase(),
-                    row.loaded,
-                    row.fail,
-                    row.returned,
-                )
-            })
+            .map(|row| (row.id.to_lowercase(), row.loaded, row.fail, row.returned))
             .collect(),
     }
 }
@@ -868,9 +868,7 @@ impl LoaderStatus {
     fn row_of(&self, id: &str) -> (Option<bool>, String, u32) {
         let key = id.to_lowercase();
         match self.rows.iter().find(|(seen, _, _, _)| *seen == key) {
-            Some((_, loaded, fail, returned)) => {
-                (Some(*loaded), fail.clone(), *returned)
-            }
+            Some((_, loaded, fail, returned)) => (Some(*loaded), fail.clone(), *returned),
             None => (None, String::new(), 0),
         }
     }
@@ -914,9 +912,7 @@ fn kebab(stem: &str) -> String {
         let break_before = index > 0
             && ch.is_uppercase()
             && (!chars[index - 1].is_uppercase()
-                || chars
-                    .get(index + 1)
-                    .is_some_and(|next| next.is_lowercase()));
+                || chars.get(index + 1).is_some_and(|next| next.is_lowercase()));
         if break_before {
             out.push('-');
         }
@@ -1037,9 +1033,8 @@ pub fn set_mod_enabled(root: &Root, id: &str, enabled: bool) -> Result<String, S
 
     let mut disabled: Vec<String> = Vec::new();
     if path.is_file() {
-        let file = read_enabled_file(&path).map_err(|err| {
-            format!("{err} —— 启动器拒绝覆盖，请先人工修好：{}", path.display())
-        })?;
+        let file = read_enabled_file(&path)
+            .map_err(|err| format!("{err} —— 启动器拒绝覆盖，请先人工修好：{}", path.display()))?;
         disabled = file.disabled;
     }
     disabled.retain(|seen| seen.trim() != id);
@@ -1071,9 +1066,9 @@ pub fn set_mod_enabled(root: &Root, id: &str, enabled: bool) -> Result<String, S
 fn valid_mod_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
-        && value.chars().all(|ch| {
-            ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.' || ch == '-'
-        })
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.' || ch == '-')
 }
 
 /// 勾/撤一个客户端插件：写 `mods/mods.json` 里那一条的 `enabled`。
@@ -1128,7 +1123,9 @@ pub fn set_client_mod_enabled(root: &Root, id: &str, enabled: bool) -> Result<St
     } else if in_legacy && !reduced {
         message.push_str(" —— 注意：宿主清单不是缩减版，这件存量 DLL 会被宿主自己装上，开关被绕过");
     }
-    message.push_str("。开关下次启动客户端才生效：清单只在启动时读一次，装进来的模块被 PIN 到进程结束");
+    message.push_str(
+        "。开关下次启动客户端才生效：清单只在启动时读一次，装进来的模块被 PIN 到进程结束",
+    );
     Ok(message)
 }
 
@@ -1148,7 +1145,9 @@ pub fn import_client_mod(root: &Root, source: &Path) -> Result<String, String> {
     }
     if let Ok(client_real) = client.canonicalize() {
         if source.starts_with(&client_real) {
-            return Err("这个目录已经在客户端里了，不需要导入（它本来就在那两个根之下）".to_string());
+            return Err(
+                "这个目录已经在客户端里了，不需要导入（它本来就在那两个根之下）".to_string(),
+            );
         }
     }
     let name = source
@@ -1190,7 +1189,8 @@ fn copy_tree(from: &Path, to: &Path, limit: u64) -> Result<u64, String> {
     let mut total = 0u64;
     let mut stack = vec![from.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let entries = fs::read_dir(&dir).map_err(|err| format!("读 {} 失败：{err}", dir.display()))?;
+        let entries =
+            fs::read_dir(&dir).map_err(|err| format!("读 {} 失败：{err}", dir.display()))?;
         for entry in entries.flatten() {
             let path = entry.path();
             let rel = path
@@ -1205,10 +1205,11 @@ fn copy_tree(from: &Path, to: &Path, limit: u64) -> Result<u64, String> {
             total += fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
             if total > limit {
                 let _ = fs::remove_dir_all(to);
-                return Err(format!("这个 mod 超过 {limit} 字节，不像一个 mod 目录（已撤销拷贝）"));
+                return Err(format!(
+                    "这个 mod 超过 {limit} 字节，不像一个 mod 目录（已撤销拷贝）"
+                ));
             }
-            fs::copy(&path, &dst)
-                .map_err(|err| format!("拷 {} 失败：{err}", dst.display()))?;
+            fs::copy(&path, &dst).map_err(|err| format!("拷 {} 失败：{err}", dst.display()))?;
         }
     }
     Ok(total)
@@ -1216,7 +1217,12 @@ fn copy_tree(from: &Path, to: &Path, limit: u64) -> Result<u64, String> {
 
 /// 把导入的 DLL 逐条登记进 `mods.json`；那份清单还不在场就新建一份，并在结论里说清楚
 /// 「没缩宿主清单之前它不会被加载」，不然玩家以为导完就生效。
-fn register_imported(mods_dir: &Path, id: &str, dlls: &[String], bytes: u64) -> Result<String, String> {
+fn register_imported(
+    mods_dir: &Path,
+    id: &str,
+    dlls: &[String],
+    bytes: u64,
+) -> Result<String, String> {
     let path = mods_dir.join("mods.json");
     let mut value: serde_json::Value = match fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str(text.strip_prefix('\u{feff}').unwrap_or(&text))
@@ -1262,7 +1268,10 @@ fn register_imported(mods_dir: &Path, id: &str, dlls: &[String], bytes: u64) -> 
         dir = mods_dir.join(id).display(),
         names = names.join("、"),
     );
-    let client = mods_dir.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let client = mods_dir
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
     let host = read_plugin_file(&client.join(LEGACY_ROOT).join("plugins.json"));
     let reduced = matches!(host.0, ManifestState::Present) && is_reduced_host_manifest(&host.1);
     if !loader_will_run(&client) {
@@ -1382,7 +1391,9 @@ pub fn import_server_mod(root: &Root, source: &Path) -> Result<String, String> {
     let copied = copy_tree(&source, &target, IMPORT_SIZE_LIMIT)?;
     let mut placed: Vec<std::path::PathBuf> = Vec::new();
     for file in &scripts {
-        let Some(stem) = file.file_name() else { continue };
+        let Some(stem) = file.file_name() else {
+            continue;
+        };
         let dst = scripts_dir.join(stem);
         match fs::copy(file, &dst) {
             Ok(_) => placed.push(dst),
@@ -1392,7 +1403,10 @@ pub fn import_server_mod(root: &Root, source: &Path) -> Result<String, String> {
                     let _ = fs::remove_file(done);
                 }
                 let _ = fs::remove_dir_all(&target);
-                return Err(format!("拷 {} 失败：{err}（已撤销本轮导入）", dst.display()));
+                return Err(format!(
+                    "拷 {} 失败：{err}（已撤销本轮导入）",
+                    dst.display()
+                ));
             }
         }
     }
@@ -1460,7 +1474,10 @@ mod tests {
     fn kebab_matches_the_dll_names_on_disk() {
         for (stem, want) in [
             ("ApocalypseNativeHard", "apocalypse-native-hard"),
-            ("ApocalypseNativeSourceProbe", "apocalypse-native-source-probe"),
+            (
+                "ApocalypseNativeSourceProbe",
+                "apocalypse-native-source-probe",
+            ),
             ("ApocalypseThirdCard", "apocalypse-third-card"),
             ("ApocalypseWaitingPanel", "apocalypse-waiting-panel"),
             ("CNFontRaster", "cn-font-raster"),
@@ -1518,7 +1535,11 @@ mod tests {
         for dll in ["CNFontRaster.dll", "FakePlugin.dll"] {
             std::fs::write(plugins_dir.join(dll), b"not a real dll").expect("造 DLL 占位");
         }
-        let quoted = dir.join("client").display().to_string().replace('\\', "\\\\");
+        let quoted = dir
+            .join("client")
+            .display()
+            .to_string()
+            .replace('\\', "\\\\");
         std::fs::write(
             dir.join("server").join("launcher.local.json"),
             format!("{{\"client_dir\": \"{quoted}\"}}"),
@@ -1569,7 +1590,10 @@ mod tests {
             .iter()
             .find(|p| p.dll == "FakePlugin.dll")
             .expect("FakePlugin 在列");
-        assert!(fake.in_manifest && !fake.enabled, "清单里 enabled:false 要显示成没加载");
+        assert!(
+            fake.in_manifest && !fake.enabled,
+            "清单里 enabled:false 要显示成没加载"
+        );
         let raster = declared
             .plugins
             .iter()
@@ -1588,13 +1612,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("client").join(".115us-mods")).expect("临时插件目录");
         std::fs::create_dir_all(dir.join("server")).expect("临时 server 目录");
-        let quoted = dir.join("client").display().to_string().replace('\\', "\\\\");
+        let quoted = dir
+            .join("client")
+            .display()
+            .to_string()
+            .replace('\\', "\\\\");
         std::fs::write(
             dir.join("server").join("launcher.local.json"),
             format!("{{\"client_dir\": \"{quoted}\"}}"),
         )
         .expect("造 launcher.local.json");
-        (Root { path: dir.clone(), source: "test" }, dir)
+        (
+            Root {
+                path: dir.clone(),
+                source: "test",
+            },
+            dir,
+        )
     }
 
     const REDUCED_HOST: &str = r#"{"autoDiscover":false,"recurse":false,"plugins":[
@@ -1617,7 +1651,8 @@ mod tests {
             std::fs::write(plugins.join(dll), b"not a real dll").expect("造存量 DLL");
         }
         std::fs::write(plugins.join("plugins.json"), REDUCED_HOST).expect("写缩减宿主清单");
-        std::fs::write(mods.join("cool-mod").join("Cool.dll"), b"not a real dll").expect("造导入 DLL");
+        std::fs::write(mods.join("cool-mod").join("Cool.dll"), b"not a real dll")
+            .expect("造导入 DLL");
         std::fs::write(
             mods.join("mods.json"),
             r#"{"schema":1,"autoDiscover":true,"plugins":[
@@ -1640,14 +1675,30 @@ mod tests {
 
         let state = client_mods(&root);
         assert!(state.switchable, "mods.json 在场时开关该可用");
-        assert!(state.bypass_note.is_empty(), "缩减版宿主清单不该报警：{}", state.bypass_note);
+        assert!(
+            state.bypass_note.is_empty(),
+            "缩减版宿主清单不该报警：{}",
+            state.bypass_note
+        );
         assert!(state.loader.seen, "统一入口的自证状态要读到");
 
-        let raster = state.plugins.iter().find(|p| p.dll == "CNFontRaster.dll").expect("在列");
+        let raster = state
+            .plugins
+            .iter()
+            .find(|p| p.dll == "CNFontRaster.dll")
+            .expect("在列");
         assert!(!raster.enabled, "mods.json 里的 enabled:false 要显示成关掉");
-        assert!(raster.description.contains("宋体等宽光栅化"), "内置说明要在：{}", raster.description);
+        assert!(
+            raster.description.contains("宋体等宽光栅化"),
+            "内置说明要在：{}",
+            raster.description
+        );
 
-        let cool = state.plugins.iter().find(|p| p.dll == "Cool.dll").expect("导入的在列");
+        let cool = state
+            .plugins
+            .iter()
+            .find(|p| p.dll == "Cool.dll")
+            .expect("导入的在列");
         assert!(cool.enabled && cool.in_manifest);
         assert_eq!(cool.loaded, Some(false), "统一入口报的是没装上");
         assert_eq!(cool.load_note, "LoadLibrary 126");
@@ -1668,9 +1719,15 @@ mod tests {
             .iter()
             .find(|p| p.dll == "EliteCompanionPilot.dll")
             .expect("清单外文件也要列出来");
-        assert!(!dark.in_manifest && !dark.enabled, "缩减之后没人扫这个根，不能显示成已加载");
+        assert!(
+            !dark.in_manifest && !dark.enabled,
+            "缩减之后没人扫这个根，不能显示成已加载"
+        );
         assert!(!dark.description.is_empty(), "清单外的件也该有内置说明");
-        assert!(!state.plugins.iter().any(|p| p.dll == "mod-loader.dll"), "统一入口自己不是 mod");
+        assert!(
+            !state.plugins.iter().any(|p| p.dll == "mod-loader.dll"),
+            "统一入口自己不是 mod"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1684,7 +1741,11 @@ mod tests {
         std::fs::write(plugins.join("plugins.json"), REDUCED_HOST).expect("写缩减清单");
         let state = client_mods(&root);
         assert!(!state.switchable);
-        assert!(state.bypass_note.contains("mod-loader-unify-20261016"), "{}", state.bypass_note);
+        assert!(
+            state.bypass_note.contains("mod-loader-unify-20261016"),
+            "{}",
+            state.bypass_note
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1735,9 +1796,15 @@ mod tests {
             message.contains("停用") && message.contains("下次启动客户端才生效"),
             "{message}"
         );
-        assert!(!message.contains("注意"), "缩减清单 + 统一入口在场时不该报警：{message}");
+        assert!(
+            !message.contains("注意"),
+            "缩减清单 + 统一入口在场时不该报警：{message}"
+        );
         let text = std::fs::read_to_string(&path).expect("读回来");
-        assert!(text.contains("\"origin\": \"手工导入\""), "未知键被弄丢了：{text}");
+        assert!(
+            text.contains("\"origin\": \"手工导入\""),
+            "未知键被弄丢了：{text}"
+        );
         assert!(text.contains("\"enabled\": false"), "开关没落盘：{text}");
         assert!(text.contains("自定义文案"), "说明被弄丢了：{text}");
         let err = set_client_mod_enabled(&root, "no-such-mod", true).unwrap_err();
@@ -1758,13 +1825,22 @@ mod tests {
 
         let message = import_client_mod(&root, &source).expect("导入成功");
         let target = dir.join("client").join("mods").join("my-mod");
-        assert!(target.join("My.dll").is_file() && target.join("data").join("note.txt").is_file(),
-                "附属文件要跟着拷：{}", target.display());
+        assert!(
+            target.join("My.dll").is_file() && target.join("data").join("note.txt").is_file(),
+            "附属文件要跟着拷：{}",
+            target.display()
+        );
         let text = std::fs::read_to_string(dir.join("client").join("mods").join("mods.json"))
             .expect("登记写出来了");
         assert!(text.contains("mods/my-mod/My.dll"), "{text}");
-        assert!(text.contains("\"autoDiscover\": true"), "新建清单要带自动发现：{text}");
-        assert!(message.contains("mod-loader.dll 不在场"), "没迁移时要讲清楚不会装载：{message}");
+        assert!(
+            text.contains("\"autoDiscover\": true"),
+            "新建清单要带自动发现：{text}"
+        );
+        assert!(
+            message.contains("mod-loader.dll 不在场"),
+            "没迁移时要讲清楚不会装载：{message}"
+        );
         let err = import_client_mod(&root, &source).unwrap_err();
         assert!(err.contains("已经导入过同名"), "{err}");
         let _ = std::fs::remove_dir_all(outer);
@@ -1797,9 +1873,16 @@ mod tests {
                 PLUGIN_DESCRIPTIONS.iter().any(|(key, _)| key == name),
                 "「{name}」没有内置说明"
             );
-            assert!(!pick_description(name, "").is_empty(), "「{name}」的说明是空的");
+            assert!(
+                !pick_description(name, "").is_empty(),
+                "「{name}」的说明是空的"
+            );
         }
-        assert_eq!(PLUGIN_DESCRIPTIONS.len(), on_disk.len(), "表里多了一条不存在的件");
+        assert_eq!(
+            PLUGIN_DESCRIPTIONS.len(),
+            on_disk.len(),
+            "表里多了一条不存在的件"
+        );
     }
 
     /// 服务端 mod 有两半：规则脚本要平铺进 `<包根>/mods` 才不用重编译，整个目录另存一份等着重编译。
@@ -1827,8 +1910,14 @@ mod tests {
             "整个目录要另存一份：{}",
             laid.display()
         );
-        assert!(message.contains("1 份规则脚本"), "要说清平铺了几份：{message}");
-        assert!(message.contains("重编译"), "Go 型那一半要讲清不重编译不装载：{message}");
+        assert!(
+            message.contains("1 份规则脚本"),
+            "要说清平铺了几份：{message}"
+        );
+        assert!(
+            message.contains("重编译"),
+            "Go 型那一半要讲清不重编译不装载：{message}"
+        );
 
         let err = import_server_mod(&root, &source).unwrap_err();
         assert!(err.contains("已经导入过同名"), "{err}");
@@ -1907,17 +1996,16 @@ mod tests {
 
         let message = import_server_mod(&root, &source).expect("导入成功");
         assert!(
-            dir.join("mods")
-                .join("plain.hook")
-                .join("mod.go")
-                .is_file(),
+            dir.join("mods").join("plain.hook").join("mod.go").is_file(),
             "整个目录要落进脚本目录的子目录"
         );
         assert!(!dir.join("mods").join("mod.go").exists(), "Go 件不该被平铺");
         assert!(message.contains("没取到 .lua 规则脚本"), "{message}");
-        assert!(message.contains("放对位置"), "要说明这只是放对位置：{message}");
+        assert!(
+            message.contains("放对位置"),
+            "要说明这只是放对位置：{message}"
+        );
         let _ = std::fs::remove_dir_all(outer);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
-

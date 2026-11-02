@@ -131,41 +131,7 @@ impl GmShared {
         if start {
             let shared = self.clone();
             let begin = located.expect("start 只在找到目录时置真");
-            std::thread::spawn(move || {
-                match gmindex::load(&begin) {
-                    Ok(cat) => {
-                        let mut inner = shared.0.lock().unwrap_or_else(|e| e.into_inner());
-                        inner.catalog = Some(Arc::new(cat));
-                        inner.stage = READY.into();
-                        inner.error = String::new();
-                    }
-                    Err(err) => {
-                        let mut inner = shared.0.lock().unwrap_or_else(|e| e.into_inner());
-                        if inner.stage == LOADING {
-                            inner.stage = FAILED.into();
-                            inner.error = err;
-                        }
-                    }
-                }
-            });
-        }
-        Err(self.stage())
-    }
-
-    /// 当前阶段（供状态视图用）。
-    fn stage(&self) -> String {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).stage.clone()
-    }
-
-    /// 重新读一遍产物（离线重建后点「重新加载」），成功前保留旧目录可查询。
-    pub(crate) fn reload(&self, root: &Root) -> Result<(), String> {
-        let dir = gmindex::find_configs(&root.path)
-            .ok_or_else(|| "未找到 GM 产物目录，请先离线运行 gmbuild 构建".to_string())?;
-        let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        inner.stage = LOADING.into();
-        let shared = self.clone();
-        std::thread::spawn(move || {
-            match gmindex::load(&dir) {
+            std::thread::spawn(move || match gmindex::load(&begin) {
                 Ok(cat) => {
                     let mut inner = shared.0.lock().unwrap_or_else(|e| e.into_inner());
                     inner.catalog = Some(Arc::new(cat));
@@ -178,6 +144,40 @@ impl GmShared {
                         inner.stage = FAILED.into();
                         inner.error = err;
                     }
+                }
+            });
+        }
+        Err(self.stage())
+    }
+
+    /// 当前阶段（供状态视图用）。
+    fn stage(&self) -> String {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .stage
+            .clone()
+    }
+
+    /// 重新读一遍产物（离线重建后点「重新加载」），成功前保留旧目录可查询。
+    pub(crate) fn reload(&self, root: &Root) -> Result<(), String> {
+        let dir = gmindex::find_configs(&root.path)
+            .ok_or_else(|| "未找到 GM 产物目录，请先离线运行 gmbuild 构建".to_string())?;
+        let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        inner.stage = LOADING.into();
+        let shared = self.clone();
+        std::thread::spawn(move || match gmindex::load(&dir) {
+            Ok(cat) => {
+                let mut inner = shared.0.lock().unwrap_or_else(|e| e.into_inner());
+                inner.catalog = Some(Arc::new(cat));
+                inner.stage = READY.into();
+                inner.error = String::new();
+            }
+            Err(err) => {
+                let mut inner = shared.0.lock().unwrap_or_else(|e| e.into_inner());
+                if inner.stage == LOADING {
+                    inner.stage = FAILED.into();
+                    inner.error = err;
                 }
             }
         });
@@ -217,7 +217,9 @@ fn clamp_limit(limit: i64) -> usize {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn gm_status(state: tauri::State<'_, crate::commands::AppState>) -> Result<GmStatusView, String> {
+pub async fn gm_status(
+    state: tauri::State<'_, crate::commands::AppState>,
+) -> Result<GmStatusView, String> {
     let shared = state.gm.clone();
     let root = state.root.clone();
     // 不留 move 闭包：ensure 现在只借 self，句柄克隆进闭包参数即可，外面还要读状态。
@@ -231,7 +233,11 @@ pub async fn gm_status(state: tauri::State<'_, crate::commands::AppState>) -> Re
     Ok(GmStatusView {
         stage,
         error: inner.error.clone(),
-        dir: inner.catalog.as_ref().map(|c| c.status.dir.clone()).unwrap_or_default(),
+        dir: inner
+            .catalog
+            .as_ref()
+            .map(|c| c.status.dir.clone())
+            .unwrap_or_default(),
         catalog: inner.catalog.as_ref().map(|c| c.status.clone()),
     })
 }
@@ -271,7 +277,12 @@ pub async fn gm_search(
         let cat = shared.ensure(&root)?;
         let hits = cat.search(raw);
         let total = hits.len();
-        let items = hits.into_iter().skip(offset).take(limit).map(row_of).collect();
+        let items = hits
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(row_of)
+            .collect();
         Ok(GmSearchResult { total, items })
     })
     .await
@@ -286,7 +297,9 @@ pub async fn gm_item(
     let root = state.root.clone();
     crate::commands::join(move || {
         let cat = shared.ensure(&root)?;
-        cat.get(id).map(row_of).ok_or_else(|| format!("物品 {id} 不在物品库里"))
+        cat.get(id)
+            .map(row_of)
+            .ok_or_else(|| format!("物品 {id} 不在物品库里"))
     })
     .await
 }
@@ -346,10 +359,21 @@ mod probes {
 
         let t = Instant::now();
         let all = cat.search(Query::default());
-        println!("PHASE=2 空条件 {:.3}s 命中={}", t.elapsed().as_secs_f64(), all.len());
+        println!(
+            "PHASE=2 空条件 {:.3}s 命中={}",
+            t.elapsed().as_secs_f64(),
+            all.len()
+        );
         let t = Instant::now();
-        let kw = cat.search(Query { q: "巨剑".into(), ..Default::default() });
-        println!("PHASE=3 关键字 {:.3}s 命中={}", t.elapsed().as_secs_f64(), kw.len());
+        let kw = cat.search(Query {
+            q: "巨剑".into(),
+            ..Default::default()
+        });
+        println!(
+            "PHASE=3 关键字 {:.3}s 命中={}",
+            t.elapsed().as_secs_f64(),
+            kw.len()
+        );
         let row = row_of(kw.first().expect("关键字无命中"));
         println!("行样例：{} {} / {}", row.id, row.name, row.type_label);
         std::thread::sleep(hold);
